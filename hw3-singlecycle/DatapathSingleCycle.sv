@@ -251,8 +251,26 @@ module DatapathSingleCycle (
 
   CarryLookaheadAdder ALU_adder(.a(cla_in1), .b(cla_in2), .cin(cla_cin), .sum(cla_sum));
 
+  logic equal;
+
   always_comb begin
     illegal_insn = 1'b0;
+
+    halt = 1'b0;         
+    we   = 1'b0;          
+    rd   = 5'b0; 
+    rs1 = 5'b0;
+    rs2 = 5'b0;
+    rd_data = 32'b0;
+    pcNext = pcCurrent + 4;
+
+    cla_in1 = 32'b0;
+    cla_in2 = 32'b0;
+    cla_cin = 1'b0;
+
+    trace_completed_pc = pcCurrent;
+    trace_completed_insn = insn_from_imem;
+    trace_completed_cycle_status = CYCLE_NO_STALL;
 
     case (insn_opcode)
       OpLui: begin
@@ -281,19 +299,51 @@ module DatapathSingleCycle (
         pcNext = pcCurrent + 4;
 
         // check which specific OpRegImm instruction it is, and set rd_data and rs1 accordingly
+
         if(insn_addi) begin
+
+          // sets inputs of cla as rs1_data and immediate from the instruction
           cla_in1 = rs1_data;
           cla_in2 = imm_i_sext;
+
+          // carry set as zero and sum connected to rd_data
           cla_cin = 1'b0;
           rd_data = cla_sum;
         end
-
+        
         else if(insn_slli) begin
+
+          // shifts rs1_data left by the amount specified in the instruction, and sets rd_data to the result
           rd_data = rs1_data << imm_shamt;
         end
 
         else if(insn_ori) begin
+          // sets rd_data to the bitwise OR of rs1_data and the immediate from the instruction
           rd_data = rs1_data | imm_i_sext;
+        end
+
+      end
+
+      OpBranch: begin
+        we = 1'b0;
+        rs2 = insn_rs2;
+        rs1 = insn_rs1;
+
+
+        if(insn_bne) begin
+          pcNext = (rs1_data == rs2_data) ? (pcCurrent + 4) : (pcCurrent + imm_b_sext);
+        end
+
+        if(insn_beq) begin
+          pcNext = (rs1_data == rs2_data) ? (pcCurrent + imm_b_sext) : (pcCurrent + 4);
+        end
+
+      end
+
+      OpEnviron:begin
+        
+        if (insn_ecall) begin
+          halt = 1'b1;
         end
 
       end
