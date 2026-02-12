@@ -30,6 +30,30 @@ module RegFile (
 
   // TODO: your code here
 
+
+  // NOTE FOR FUTURE OPTIMIZATION: can skip devoting a physical register to x0. 
+  // Instead, can just hardcode x0 to always return 0 on reads, and ignore writes to x0.
+
+  // set the rs1 and rs2 data outputs to the appropriate register values
+  assign rs1_data = regs[rs1];
+  assign rs2_data = regs[rs2];
+
+  // clock triggered behavior for writing to registers
+  always_ff @(posedge clk) begin
+    if(rst) begin
+        // all registers initialized to 0 on reset
+        for (int i = 0; i < NumRegs; i++) begin
+          regs[i] <= 0;
+        end
+    end
+    // write to corresponding register when we is high, except for x0, which is always 0
+    else if (we) begin
+      if (rd != 0) begin
+        regs[rd] <= rd_data;
+      end
+    end
+  end
+
 endmodule
 
 module DatapathSingleCycle (
@@ -81,10 +105,15 @@ module DatapathSingleCycle (
   wire [20:0] imm_j;
   assign {imm_j[20], imm_j[10:1], imm_j[11], imm_j[19:12], imm_j[0]} = {insn_from_imem[31:12], 1'b0};
 
+  // U - lui and auipc
+  wire [19:0] imm_u;
+  assign imm_u = insn_from_imem[31:12];
+
   wire [`REG_SIZE] imm_i_sext = {{20{imm_i[11]}}, imm_i[11:0]};
   wire [`REG_SIZE] imm_s_sext = {{20{imm_s[11]}}, imm_s[11:0]};
   wire [`REG_SIZE] imm_b_sext = {{19{imm_b[12]}}, imm_b[12:0]};
   wire [`REG_SIZE] imm_j_sext = {{11{imm_j[20]}}, imm_j[20:0]};
+  wire [`REG_SIZE] imm_u_sext = {{12{imm_u[19]}}, imm_u[19:0]};
 
   // opcodes - see section 19 of RiscV spec
   localparam bit [`OPCODE_SIZE] OpLoad = 7'b00_000_11;
@@ -201,18 +230,26 @@ module DatapathSingleCycle (
   // TODO: you will need to edit the port connections, however.
   wire [`REG_SIZE] rs1_data;
   wire [`REG_SIZE] rs2_data;
+  logic [`REG_SIZE] rd_data;
+  logic [4:0] rs1, rs2, rd;
+  logic we;
   RegFile rf (
     .clk(clk),
     .rst(rst),
-    .we(1'b0),
-    .rd(0),
-    .rd_data(0),
-    .rs1(0),
-    .rs2(0),
+    .we(we),
+    .rd(rd),
+    .rd_data(rd_data),
+    .rs1(rs1),
+    .rs2(rs2),
     .rs1_data(rs1_data),
     .rs2_data(rs2_data));
 
   logic illegal_insn;
+
+  logic [`REG_SIZE] cla_in1, cla_in2, cla_sum;
+  logic cla_cin;
+
+  CarryLookaheadAdder ALU_adder(.a(cla_in1), .b(cla_in2), .cin(cla_cin), .sum(cla_sum));
 
   always_comb begin
     illegal_insn = 1'b0;
@@ -220,11 +257,52 @@ module DatapathSingleCycle (
     case (insn_opcode)
       OpLui: begin
         // TODO: start here by implementing lui
+        
+        // sets desination register to insn_rd
+        rd = insn_rd;
+
+        // sets the rd_data to the 20 bit immediate shifted left by 12 bits
+        rd_data = {imm_u_sext[19:0], 12'b0};
+
+        // sets rf write enable to 1, so that rd_data gets written
+        we = 1'b1;
+
+        // increments PC by 4
+        pcNext = pcCurrent + 4;
+
       end
+
+      OpRegImm: begin
+
+        // all OpRegIm instructions set we to 1 and rd to insn_rd, and increment PC by 4
+        we = 1'b1;
+        rd = insn_rd;
+        rs1 = insn_rs1;
+        pcNext = pcCurrent + 4;
+
+        // check which specific OpRegImm instruction it is, and set rd_data and rs1 accordingly
+        if(insn_addi) begin
+          cla_in1 = rs1_data;
+          cla_in2 = imm_i_sext;
+          cla_cin = 1'b0;
+          rd_data = cla_sum;
+        end
+
+        else if(insn_slli) begin
+          rd_data = rs1_data << imm_shamt;
+        end
+
+        else if(insn_ori) begin
+          rd_data = rs1_data | imm_i_sext;
+        end
+
+      end
+
       default: begin
         illegal_insn = 1'b1;
       end
     endcase
+
   end
 
 endmodule
