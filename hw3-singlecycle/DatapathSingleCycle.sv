@@ -267,10 +267,6 @@ module DatapathSingleCycle (
     cla_in2 = 32'b0;
     cla_cin = 1'b0;
 
-    trace_completed_pc = pcCurrent;
-    trace_completed_insn = insn_from_imem;
-    trace_completed_cycle_status = CYCLE_NO_STALL;
-
     case (insn_opcode)
       OpLui: begin
         // TODO: start here by implementing lui
@@ -500,6 +496,11 @@ module DatapathSingleCycle (
     endcase
 
   end
+
+// Drive the trace signals so the testbench can see progress
+assign trace_completed_pc = pcCurrent;
+assign trace_completed_insn = insn_from_imem;
+assign trace_completed_cycle_status = CYCLE_NO_STALL;
 
 endmodule
 
