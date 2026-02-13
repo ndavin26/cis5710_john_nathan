@@ -113,7 +113,6 @@ module DatapathSingleCycle (
   wire [`REG_SIZE] imm_s_sext = {{20{imm_s[11]}}, imm_s[11:0]};
   wire [`REG_SIZE] imm_b_sext = {{19{imm_b[12]}}, imm_b[12:0]};
   wire [`REG_SIZE] imm_j_sext = {{11{imm_j[20]}}, imm_j[20:0]};
-  wire [`REG_SIZE] imm_u_sext = {{12{imm_u[19]}}, imm_u[19:0]};
 
   // opcodes - see section 19 of RiscV spec
   localparam bit [`OPCODE_SIZE] OpLoad = 7'b00_000_11;
@@ -280,7 +279,7 @@ module DatapathSingleCycle (
         rd = insn_rd;
 
         // sets the rd_data to the 20 bit immediate shifted left by 12 bits
-        rd_data = {imm_u_sext[19:0], 12'b0};
+        rd_data = {imm_u, 12'b0};
 
         // sets rf write enable to 1, so that rd_data gets written
         we = 1'b1;
@@ -378,7 +377,7 @@ module DatapathSingleCycle (
           rd_data = cla_sum;
         end
 
-        if(insn_sub) begin
+        else if(insn_sub) begin
 
           // sets inputs of the cla to execute subraction
           // addition of A and 2's complement of B is the same as A - B
@@ -392,10 +391,53 @@ module DatapathSingleCycle (
 
         end
 
-        
+        else if(insn_sll) begin
+          
+          // shifts rs1_data left by lower 5 bits of rs2_data and stores value in rd_data
+          rd_data = rs1_data << rs2_data[4:0];
+        end
 
+        else if(insn_slt) begin
+          
+          // sets rd_data to 1 if rs1_data is less than rs2_data (signed comparison) 
+          rd_data = ($signed(rs1_data) < $signed(rs2_data)) ? 32'b1 : 32'b0;
+        end
 
+        else if(insn_sltu) begin
+          
+          // sets rd_data to 1 if rs1_data is less than rs2_data (unsigned comparison)
+          rd_data = (rs1_data < rs2_data) ? 32'b1 : 32'b0;
+        end
 
+        else if(insn_xor) begin
+          
+          // sets rd_data to the bitwise XOR of rs1_data and rs2_data
+          rd_data = rs1_data ^ rs2_data;
+        end
+
+        else if(insn_srl) begin
+          
+          // shifts rs1_data right by lower 5 bits of rs2_data and stores value in rd_data
+          rd_data = rs1_data >> rs2_data[4:0];
+        end
+
+        else if(insn_sra) begin
+          
+          // arithmetic right shift of rs1_data by lower 5 bits of rs2_data, and stores value in rd_data
+          rd_data = $signed(rs1_data) >>> rs2_data[4:0];
+        end
+
+        else if(insn_or) begin
+          
+          // stores bitwise or of rs1_data and rs2_data in rd_data
+          rd_data = rs1_data | rs2_data;
+        end
+
+        else if(insn_and) begin
+          
+          // stores bitwise and of rs1_data and rs2_data in rd_data
+          rd_data = rs1_data & rs2_data;
+        end
       end
 
       OpBranch: begin
@@ -411,10 +453,34 @@ module DatapathSingleCycle (
           pcNext = (rs1_data == rs2_data) ? (pcCurrent + 4) : (pcCurrent + imm_b_sext);
         end
 
-        if(insn_beq) begin
+        else if(insn_beq) begin
 
           // increment pc by immediate if rs1 and rs2 are equal, and by 4 otherwise
           pcNext = (rs1_data == rs2_data) ? (pcCurrent + imm_b_sext) : (pcCurrent + 4);
+        end
+
+        else if (insn_blt) begin
+
+          // increment pc by immediate if rs1_data is less than rs2_data (signed comparison), and by 4 otherwise
+          pcNext = ($signed(rs1_data) < $signed(rs2_data)) ? (pcCurrent + imm_b_sext) : (pcCurrent + 4);
+        end
+
+        else if (insn_bge) begin
+
+          // increment pc by immediate if rs1_data is greater than or equal to rs2_data (signed comparison), and by 4 otherwise
+          pcNext = ($signed(rs1_data) >= $signed(rs2_data)) ? (pcCurrent + imm_b_sext) : (pcCurrent + 4);
+        end
+
+        else if (insn_bltu) begin
+
+          // increment pc by immediate if rs1_data is less than rs2_data (unsigned comparison), and by 4 otherwise
+          pcNext = (rs1_data < rs2_data) ? (pcCurrent + imm_b_sext) : (pcCurrent + 4);
+        end
+
+        else if (insn_bgeu) begin
+
+          // increment pc by immediate if rs1_data is greater than or equal to rs2_data (unsigned comparison), and by 4 otherwise
+          pcNext = (rs1_data >= rs2_data) ? (pcCurrent + imm_b_sext) : (pcCurrent + 4);
         end
 
       end
