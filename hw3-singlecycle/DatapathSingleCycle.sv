@@ -296,7 +296,6 @@ module DatapathSingleCycle (
         we = 1'b1;
         rd = insn_rd;
         rs1 = insn_rs1;
-        pcNext = pcCurrent + 4;
 
         // check which specific OpRegImm instruction it is, and set rd_data and rs1 accordingly
 
@@ -310,31 +309,111 @@ module DatapathSingleCycle (
           cla_cin = 1'b0;
           rd_data = cla_sum;
         end
-        
+
+        else if(insn_slti) begin
+
+          // sets rd_data to 1 if rs1_data is less than the immediate from the instruction (signed comparison), and 0 otherwise
+          rd_data = ($signed(rs1_data) < $signed(imm_i_sext)) ? 32'b1 : 32'b0;
+        end
+
+        else if(insn_sltiu) begin
+          
+          // sets rd_data to 1 if rs1_data is less than the immediate from the instruction (unsigned comparison), and 0 otherwise
+          rd_data = (rs1_data < imm_i_sext) ? 32'b1 : 32'b0;
+
+        end
+
+        else if(insn_xori) begin
+
+          // sets rd_data to the bitwise XOR of rs1_data and the immediate from the instruction
+          rd_data = rs1_data ^ imm_i_sext;
+
+        end
+
+        else if(insn_ori) begin
+          
+          // sets rd_data to the bitwise OR of rs1_data and the immediate from the instruction
+          rd_data = rs1_data | imm_i_sext;
+        end
+
+        else if(insn_andi) begin
+          
+          // sets rd_data to the bitwise AND or rs1_data and the immediate from the instruction
+          rd_data = rs1_data & imm_i_sext;
+        end
+
         else if(insn_slli) begin
 
           // shifts rs1_data left by the amount specified in the instruction, and sets rd_data to the result
           rd_data = rs1_data << imm_shamt;
         end
 
-        else if(insn_ori) begin
-          // sets rd_data to the bitwise OR of rs1_data and the immediate from the instruction
-          rd_data = rs1_data | imm_i_sext;
+        else if(insn_srli) begin
+          
+          // shifts rs1_data left by the amoount specified in the instruction, and sets rd_data to the result
+          rd_data = rs1_data >> imm_shamt;
         end
+
+        else if(insn_srai) begin
+          
+          // arithmetic shift of rs1 to the right by imm_shamt, and sets rd_data to the result
+          rd_data = $signed(rs1_data) >>> imm_shamt;
+        end
+      end
+
+      OpRegReg: begin
+        
+        rs2 = insn_rs2;
+        rs1 = insn_rs1;
+        we = 1'b1;
+        rd = insn_rd;
+        pcNext = pcCurrent + 4;
+
+        if(insn_add) begin
+          
+          // sets inputs of the cla to the corresponding values and connects sum to rd_data
+          cla_in1 = rs1_data;
+          cla_in2 = rs2_data;
+          cla_cin = 1'b0;
+          rd_data = cla_sum;
+        end
+
+        if(insn_sub) begin
+
+          // sets inputs of the cla to execute subraction
+          // addition of A and 2's complement of B is the same as A - B
+          // cla_in connects directly to rs1_data, and cla_in2 connects to the bitwise negation of rs2_data
+          // carry in is set to 1 to complete the 2's complement negation
+          // sum is connected to rd_data
+          cla_in1 = rs1_data;
+          cla_in2 = ~rs2_data;
+          cla_cin = 1'b1;
+          rd_data = cla_sum;
+
+        end
+
+        
+
+
 
       end
 
       OpBranch: begin
+
+        // Default assignments for branch instructions
         we = 1'b0;
         rs2 = insn_rs2;
         rs1 = insn_rs1;
 
-
         if(insn_bne) begin
+
+          // increment pc by immediate if rs1 and rs2 are not equal, and by 4 otherwise
           pcNext = (rs1_data == rs2_data) ? (pcCurrent + 4) : (pcCurrent + imm_b_sext);
         end
 
         if(insn_beq) begin
+
+          // increment pc by immediate if rs1 and rs2 are equal, and by 4 otherwise
           pcNext = (rs1_data == rs2_data) ? (pcCurrent + imm_b_sext) : (pcCurrent + 4);
         end
 
@@ -342,6 +421,7 @@ module DatapathSingleCycle (
 
       OpEnviron:begin
         
+        // if the instruction is ecall, set the halt output to 1
         if (insn_ecall) begin
           halt = 1'b1;
         end
