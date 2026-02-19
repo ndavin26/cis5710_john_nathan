@@ -32,7 +32,6 @@ module RegFile (
   assign rs1_data = regs[rs1];
   assign rs2_data = regs[rs2];
 
-<<<<<<< HEAD
   // sync writes
   always_ff @(posedge clk) begin
     if (rst) begin
@@ -41,35 +40,10 @@ module RegFile (
       end
     end else if (we) begin
       if (rd != 5'd0) begin
-=======
-
-  // NOTE FOR FUTURE OPTIMIZATION: can skip devoting a physical register to x0. 
-  // Instead, can just hardcode x0 to always return 0 on reads, and ignore writes to x0.
-
-  // set the rs1 and rs2 data outputs to the appropriate register values
-  assign rs1_data = regs[rs1];
-  assign rs2_data = regs[rs2];
-
-  // clock triggered behavior for writing to registers
-  always_ff @(posedge clk) begin
-    if(rst) begin
-        // all registers initialized to 0 on reset
-        for (int i = 0; i < NumRegs; i++) begin
-          regs[i] <= 0;
-        end
-    end
-    // write to corresponding register when we is high, except for x0, which is always 0
-    else if (we) begin
-      if (rd != 0) begin
->>>>>>> 2a6328bc99bbcf94eea0a76e4244d2a1c3c0f199
         regs[rd] <= rd_data;
       end
     end
   end
-<<<<<<< HEAD
-=======
-
->>>>>>> 2a6328bc99bbcf94eea0a76e4244d2a1c3c0f199
 endmodule
 
 module DatapathSingleCycle (
@@ -116,32 +90,11 @@ module DatapathSingleCycle (
   wire [`REG_SIZE] imm_b_sext = {{19{imm_b[12]}}, imm_b};
   wire [`REG_SIZE] imm_j_sext = {{11{imm_j[20]}}, imm_j};
 
-<<<<<<< HEAD
   // opcodes
   localparam bit [`OPCODE_SIZE] OpLoad    = 7'b00_000_11;
   localparam bit [`OPCODE_SIZE] OpStore   = 7'b01_000_11;
   localparam bit [`OPCODE_SIZE] OpBranch  = 7'b11_000_11;
   localparam bit [`OPCODE_SIZE] OpJalr    = 7'b11_001_11;
-=======
-  // J - unconditional jumps
-  wire [20:0] imm_j;
-  assign {imm_j[20], imm_j[10:1], imm_j[11], imm_j[19:12], imm_j[0]} = {insn_from_imem[31:12], 1'b0};
-
-  // U - lui and auipc
-  wire [19:0] imm_u;
-  assign imm_u = insn_from_imem[31:12];
-
-  wire [`REG_SIZE] imm_i_sext = {{20{imm_i[11]}}, imm_i[11:0]};
-  wire [`REG_SIZE] imm_s_sext = {{20{imm_s[11]}}, imm_s[11:0]};
-  wire [`REG_SIZE] imm_b_sext = {{19{imm_b[12]}}, imm_b[12:0]};
-  wire [`REG_SIZE] imm_j_sext = {{11{imm_j[20]}}, imm_j[20:0]};
-
-  // opcodes - see section 19 of RiscV spec
-  localparam bit [`OPCODE_SIZE] OpLoad = 7'b00_000_11;
-  localparam bit [`OPCODE_SIZE] OpStore = 7'b01_000_11;
-  localparam bit [`OPCODE_SIZE] OpBranch = 7'b11_000_11;
-  localparam bit [`OPCODE_SIZE] OpJalr = 7'b11_001_11;
->>>>>>> 2a6328bc99bbcf94eea0a76e4244d2a1c3c0f199
   localparam bit [`OPCODE_SIZE] OpMiscMem = 7'b00_011_11;
   localparam bit [`OPCODE_SIZE] OpJal     = 7'b11_011_11;
   localparam bit [`OPCODE_SIZE] OpRegImm  = 7'b00_100_11;
@@ -245,7 +198,6 @@ module DatapathSingleCycle (
   wire [`REG_SIZE] rs1_data;
   wire [`REG_SIZE] rs2_data;
   logic [`REG_SIZE] rd_data;
-<<<<<<< HEAD
 
   wire [4:0] rs1 = insn_rs1;
   wire [4:0] rs2 = insn_rs2;
@@ -481,136 +433,10 @@ module DatapathSingleCycle (
         end else begin
           illegal_insn = 1'b1;
           we = 1'b0;
-=======
-  logic [4:0] rs1, rs2, rd;
-  logic we;
-  RegFile rf (
-    .clk(clk),
-    .rst(rst),
-    .we(we),
-    .rd(rd),
-    .rd_data(rd_data),
-    .rs1(rs1),
-    .rs2(rs2),
-    .rs1_data(rs1_data),
-    .rs2_data(rs2_data));
-
-  logic illegal_insn;
-
-  logic [`REG_SIZE] cla_in1, cla_in2, cla_sum;
-  logic cla_cin;
-
-  CarryLookaheadAdder ALU_adder(.a(cla_in1), .b(cla_in2), .cin(cla_cin), .sum(cla_sum));
-
-  logic equal;
-
-  always_comb begin
-    illegal_insn = 1'b0;
-
-    halt = 1'b0;         
-    we   = 1'b0;          
-    rd   = 5'b0; 
-    rs1 = 5'b0;
-    rs2 = 5'b0;
-    rd_data = 32'b0;
-    pcNext = pcCurrent + 4;
-
-    cla_in1 = 32'b0;
-    cla_in2 = 32'b0;
-    cla_cin = 1'b0;
-
-    case (insn_opcode)
-      OpLui: begin
-        // TODO: start here by implementing lui
-        
-        // sets desination register to insn_rd
-        rd = insn_rd;
-
-        // sets the rd_data to the 20 bit immediate shifted left by 12 bits
-        rd_data = {imm_u, 12'b0};
-
-        // sets rf write enable to 1, so that rd_data gets written
-        we = 1'b1;
-
-        // increments PC by 4
-        pcNext = pcCurrent + 4;
-
-      end
-
-      OpRegImm: begin
-
-        // all OpRegIm instructions set we to 1 and rd to insn_rd, and increment PC by 4
-        we = 1'b1;
-        rd = insn_rd;
-        rs1 = insn_rs1;
-
-        // check which specific OpRegImm instruction it is, and set rd_data and rs1 accordingly
-
-        if(insn_addi) begin
-
-          // sets inputs of cla as rs1_data and immediate from the instruction
-          cla_in1 = rs1_data;
-          cla_in2 = imm_i_sext;
-
-          // carry set as zero and sum connected to rd_data
-          cla_cin = 1'b0;
-          rd_data = cla_sum;
-        end
-
-        else if(insn_slti) begin
-
-          // sets rd_data to 1 if rs1_data is less than the immediate from the instruction (signed comparison), and 0 otherwise
-          rd_data = ($signed(rs1_data) < $signed(imm_i_sext)) ? 32'b1 : 32'b0;
-        end
-
-        else if(insn_sltiu) begin
-          
-          // sets rd_data to 1 if rs1_data is less than the immediate from the instruction (unsigned comparison), and 0 otherwise
-          rd_data = (rs1_data < imm_i_sext) ? 32'b1 : 32'b0;
-
-        end
-
-        else if(insn_xori) begin
-
-          // sets rd_data to the bitwise XOR of rs1_data and the immediate from the instruction
-          rd_data = rs1_data ^ imm_i_sext;
-
-        end
-
-        else if(insn_ori) begin
-          
-          // sets rd_data to the bitwise OR of rs1_data and the immediate from the instruction
-          rd_data = rs1_data | imm_i_sext;
-        end
-
-        else if(insn_andi) begin
-          
-          // sets rd_data to the bitwise AND or rs1_data and the immediate from the instruction
-          rd_data = rs1_data & imm_i_sext;
-        end
-
-        else if(insn_slli) begin
-
-          // shifts rs1_data left by the amount specified in the instruction, and sets rd_data to the result
-          rd_data = rs1_data << imm_shamt;
-        end
-
-        else if(insn_srli) begin
-          
-          // shifts rs1_data left by the amoount specified in the instruction, and sets rd_data to the result
-          rd_data = rs1_data >> imm_shamt;
-        end
-
-        else if(insn_srai) begin
-          
-          // arithmetic shift of rs1 to the right by imm_shamt, and sets rd_data to the result
-          rd_data = $signed(rs1_data) >>> imm_shamt;
->>>>>>> 2a6328bc99bbcf94eea0a76e4244d2a1c3c0f199
         end
       end
 
       OpRegReg: begin
-<<<<<<< HEAD
         rd = insn_rd;
         we = 1'b1;
 
@@ -681,89 +507,10 @@ module DatapathSingleCycle (
         end else begin
           illegal_insn = 1'b1;
           we = 1'b0;
-=======
-        
-        rs2 = insn_rs2;
-        rs1 = insn_rs1;
-        we = 1'b1;
-        rd = insn_rd;
-        pcNext = pcCurrent + 4;
-
-        if(insn_add) begin
-          
-          // sets inputs of the cla to the corresponding values and connects sum to rd_data
-          cla_in1 = rs1_data;
-          cla_in2 = rs2_data;
-          cla_cin = 1'b0;
-          rd_data = cla_sum;
-        end
-
-        else if(insn_sub) begin
-
-          // sets inputs of the cla to execute subraction
-          // addition of A and 2's complement of B is the same as A - B
-          // cla_in connects directly to rs1_data, and cla_in2 connects to the bitwise negation of rs2_data
-          // carry in is set to 1 to complete the 2's complement negation
-          // sum is connected to rd_data
-          cla_in1 = rs1_data;
-          cla_in2 = ~rs2_data;
-          cla_cin = 1'b1;
-          rd_data = cla_sum;
-
-        end
-
-        else if(insn_sll) begin
-          
-          // shifts rs1_data left by lower 5 bits of rs2_data and stores value in rd_data
-          rd_data = rs1_data << rs2_data[4:0];
-        end
-
-        else if(insn_slt) begin
-          
-          // sets rd_data to 1 if rs1_data is less than rs2_data (signed comparison) 
-          rd_data = ($signed(rs1_data) < $signed(rs2_data)) ? 32'b1 : 32'b0;
-        end
-
-        else if(insn_sltu) begin
-          
-          // sets rd_data to 1 if rs1_data is less than rs2_data (unsigned comparison)
-          rd_data = (rs1_data < rs2_data) ? 32'b1 : 32'b0;
-        end
-
-        else if(insn_xor) begin
-          
-          // sets rd_data to the bitwise XOR of rs1_data and rs2_data
-          rd_data = rs1_data ^ rs2_data;
-        end
-
-        else if(insn_srl) begin
-          
-          // shifts rs1_data right by lower 5 bits of rs2_data and stores value in rd_data
-          rd_data = rs1_data >> rs2_data[4:0];
-        end
-
-        else if(insn_sra) begin
-          
-          // arithmetic right shift of rs1_data by lower 5 bits of rs2_data, and stores value in rd_data
-          rd_data = $signed(rs1_data) >>> rs2_data[4:0];
-        end
-
-        else if(insn_or) begin
-          
-          // stores bitwise or of rs1_data and rs2_data in rd_data
-          rd_data = rs1_data | rs2_data;
-        end
-
-        else if(insn_and) begin
-          
-          // stores bitwise and of rs1_data and rs2_data in rd_data
-          rd_data = rs1_data & rs2_data;
->>>>>>> 2a6328bc99bbcf94eea0a76e4244d2a1c3c0f199
         end
       end
 
       OpBranch: begin
-<<<<<<< HEAD
         we = 1'b0;
         if (insn_beq) begin
           if (rs1_data == rs2_data) pcNext = pcCurrent + imm_b_sext;
@@ -785,81 +532,18 @@ module DatapathSingleCycle (
       OpEnviron: begin
         if (insn_ecall) halt = 1'b1;
         else illegal_insn = 1'b1;
-=======
-
-        // Default assignments for branch instructions
-        we = 1'b0;
-        rs2 = insn_rs2;
-        rs1 = insn_rs1;
-
-        if(insn_bne) begin
-
-          // increment pc by immediate if rs1 and rs2 are not equal, and by 4 otherwise
-          pcNext = (rs1_data == rs2_data) ? (pcCurrent + 4) : (pcCurrent + imm_b_sext);
-        end
-
-        else if(insn_beq) begin
-
-          // increment pc by immediate if rs1 and rs2 are equal, and by 4 otherwise
-          pcNext = (rs1_data == rs2_data) ? (pcCurrent + imm_b_sext) : (pcCurrent + 4);
-        end
-
-        else if (insn_blt) begin
-
-          // increment pc by immediate if rs1_data is less than rs2_data (signed comparison), and by 4 otherwise
-          pcNext = ($signed(rs1_data) < $signed(rs2_data)) ? (pcCurrent + imm_b_sext) : (pcCurrent + 4);
-        end
-
-        else if (insn_bge) begin
-
-          // increment pc by immediate if rs1_data is greater than or equal to rs2_data (signed comparison), and by 4 otherwise
-          pcNext = ($signed(rs1_data) >= $signed(rs2_data)) ? (pcCurrent + imm_b_sext) : (pcCurrent + 4);
-        end
-
-        else if (insn_bltu) begin
-
-          // increment pc by immediate if rs1_data is less than rs2_data (unsigned comparison), and by 4 otherwise
-          pcNext = (rs1_data < rs2_data) ? (pcCurrent + imm_b_sext) : (pcCurrent + 4);
-        end
-
-        else if (insn_bgeu) begin
-
-          // increment pc by immediate if rs1_data is greater than or equal to rs2_data (unsigned comparison), and by 4 otherwise
-          pcNext = (rs1_data >= rs2_data) ? (pcCurrent + imm_b_sext) : (pcCurrent + 4);
-        end
-
-      end
-
-      OpEnviron:begin
-        
-        // if the instruction is ecall, set the halt output to 1
-        if (insn_ecall) begin
-          halt = 1'b1;
-        end
-
->>>>>>> 2a6328bc99bbcf94eea0a76e4244d2a1c3c0f199
       end
 
       default: begin
         illegal_insn = 1'b1;
       end
     endcase
-
   end
 
-<<<<<<< HEAD
   // trace signals
   assign trace_completed_pc = pcCurrent;
   assign trace_completed_insn = insn_from_imem;
   assign trace_completed_cycle_status = CYCLE_NO_STALL;
-=======
-// Drive the trace signals so the testbench can see progress
-assign trace_completed_pc = pcCurrent;
-assign trace_completed_insn = insn_from_imem;
-assign trace_completed_cycle_status = CYCLE_NO_STALL;
-
-endmodule
->>>>>>> 2a6328bc99bbcf94eea0a76e4244d2a1c3c0f199
 
 endmodule
 module MemorySingleCycle #(
