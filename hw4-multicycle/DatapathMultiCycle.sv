@@ -47,7 +47,7 @@ module RegFile (
   end
 endmodule
 
-module DatapathSingleCycle (
+module DatapathMultiCycle (
     input wire                clk,
     input wire                rst,
     output logic              halt,
