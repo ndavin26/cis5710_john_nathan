@@ -182,6 +182,8 @@ module DatapathSingleCycle (
   end
   assign pc_to_imem = pcCurrent;
 
+  logic [2:0] div_stall_count;
+
   // counters (debug)
   logic [`REG_SIZE] cycles_current, num_insns_current;
   always @(posedge clk) begin
@@ -218,9 +220,12 @@ module DatapathSingleCycle (
   logic cla_cin;
   CarryLookaheadAdder ALU_adder(.a(cla_in1), .b(cla_in2), .cin(cla_cin), .sum(cla_sum));
 
+
   function automatic logic [31:0] twos_comp32(input logic [31:0] x);
     twos_comp32 = (~x) + 32'd1;
   endfunction
+
+
 
   // ---------------- Divider (HW2A) ----------------
   logic [31:0] div_in_dividend, div_in_divisor;
@@ -234,6 +239,7 @@ module DatapathSingleCycle (
   logic div_div_by_zero, div_overflow;
   logic div_a_neg, div_b_neg;
   logic [31:0] div_a_abs, div_b_abs;
+  logic [2:0] div_stage;
 
   // -------- Dedicated comb blocks (avoid Verilator UNOPTFLAT) --------
 
@@ -251,39 +257,44 @@ module DatapathSingleCycle (
       cla_in1 = rs1_data;
       cla_in2 = rs2_data;
       cla_cin = 1'b0;
+    
+    // Use carry in bit and negation to eliminate need for an a separate adder in subtraction
     end else if (insn_sub) begin
       cla_in1 = rs1_data;
-      cla_in2 = twos_comp32(rs2_data);
-      cla_cin = 1'b0;
+      cla_in2 = ~rs2_data;
+      cla_cin = 1'b1;
     end
   end
 
   // Divider input prep in a separate block (does NOT read div_out_*)
   always_comb begin
-    div_in_dividend = 32'b0;
-    div_in_divisor  = 32'b0;
 
-    div_use         = (insn_divu || insn_remu || insn_div || insn_rem);
-    div_signed      = (insn_div  || insn_rem);
-    div_is_rem      = (insn_remu || insn_rem);
+      div_in_dividend = 32'b0;
+      div_in_divisor  = 32'b0;
 
-    div_div_by_zero = div_use && (rs2_data == 32'b0);
-    div_overflow    = div_signed && (rs1_data == 32'h8000_0000) && (rs2_data == 32'hFFFF_FFFF);
+      div_use         = (insn_divu || insn_remu || insn_div || insn_rem);
+      div_signed      = (insn_div  || insn_rem);
+      div_is_rem      = (insn_remu || insn_rem);
 
-    div_a_neg = rs1_data[31];
-    div_b_neg = rs2_data[31];
+      div_div_by_zero = div_use && (rs2_data == 32'b0);
+      div_overflow    = div_signed && (rs1_data == 32'h8000_0000) && (rs2_data == 32'hFFFF_FFFF);
 
-    div_a_abs = div_a_neg ? twos_comp32(rs1_data) : rs1_data;
-    div_b_abs = div_b_neg ? twos_comp32(rs2_data) : rs2_data;
+      div_a_neg = rs1_data[31];
+      div_b_neg = rs2_data[31];
 
-    if (insn_divu || insn_remu) begin
-      div_in_dividend = rs1_data;
-      div_in_divisor  = rs2_data;
-    end else if (insn_div || insn_rem) begin
-      div_in_dividend = div_a_abs;
-      div_in_divisor  = div_b_abs;
-    end
+      div_a_abs = div_a_neg ? twos_comp32(rs1_data) : rs1_data;
+      div_b_abs = div_b_neg ? twos_comp32(rs2_data) : rs2_data;
+
+      if (insn_divu || insn_remu) begin
+        div_in_dividend = rs1_data;
+        div_in_divisor  = rs2_data;
+      end else if (insn_div || insn_rem) begin
+        div_in_dividend = div_a_abs;
+        div_in_divisor  = div_b_abs;
+      end
   end
+  
+
 
   // ---------------- Main datapath comb ----------------
   always_comb begin
