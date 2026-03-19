@@ -8,5 +8,7 @@ import riscv_binary_utils
 riscv_binary_utils.loadBinaryIntoHexFile(
     'mystery-signal/mystery.bin', # C version
     'mem_initial_contents.hex',
-    maxAddress=4096
+    maxAddress=1024 #modifed from definitions inside /common/python/riscv_binary_utils.py
 )
+
+
