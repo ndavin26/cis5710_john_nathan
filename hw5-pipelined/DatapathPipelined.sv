@@ -226,6 +226,8 @@ module DatapathPipelined (
   logic [4:0] rf_rd;
   logic [`REG_SIZE] rf_rd_data;
   logic rf_we;
+
+
   wire [`REG_SIZE] rf_rs1_data;
   wire [`REG_SIZE] rf_rs2_data;
 
@@ -243,8 +245,10 @@ module DatapathPipelined (
 
   wire d_is_lui   = (d_opcode == OpcodeLui);
   wire d_is_auipc = (d_opcode == OpcodeAuipc);
+
   wire d_is_regimm = (d_opcode == OpcodeRegImm);
   wire d_is_regreg = (d_opcode == OpcodeRegReg);
+
   wire d_is_branch = (d_opcode == OpcodeBranch);
   wire d_is_ecall = (d_opcode == OpcodeEnviron) && (decode_state.insn[31:7] == 25'd0);
 
@@ -298,10 +302,12 @@ module DatapathPipelined (
   always_comb begin
     x_src1 = x_state.rs1_val;
     if ((x_state.rs1 != 5'd0) && m_state.reg_write && (m_state.rd == x_state.rs1)) begin
+
       x_src1 = m_state.rd_value;
     end else if ((x_state.rs1 != 5'd0) && w_state.reg_write && (w_state.rd == x_state.rs1)) begin
       x_src1 = w_state.rd_value;
     end
+
 
     x_src2 = x_state.rs2_val;
     if ((x_state.rs2 != 5'd0) && m_state.reg_write && (m_state.rd == x_state.rs2)) begin
@@ -309,6 +315,7 @@ module DatapathPipelined (
     end else if ((x_state.rs2 != 5'd0) && w_state.reg_write && (w_state.rd == x_state.rs2)) begin
       x_src2 = w_state.rd_value;
     end
+
   end
 
   logic [`REG_SIZE] x_alu_result;
@@ -318,12 +325,14 @@ module DatapathPipelined (
   always_comb begin
     x_alu_result = 32'd0;
     x_branch_taken = 1'b0;
+
     x_branch_target = x_state.pc + x_state.imm_b_sext;
 
     case (x_state.opcode)
       OpcodeLui: begin
         x_alu_result = x_state.imm_u;
       end
+
 
       OpcodeAuipc: begin
         x_alu_result = x_state.pc + x_state.imm_u;
@@ -334,10 +343,10 @@ module DatapathPipelined (
           3'b000: x_alu_result = x_src1 + x_state.imm_i_sext;                     // addi
           3'b010: x_alu_result = ($signed(x_src1) < $signed(x_state.imm_i_sext)) ? 32'd1 : 32'd0; // slti
           3'b011: x_alu_result = (x_src1 < x_state.imm_i_sext) ? 32'd1 : 32'd0;  // sltiu
-          3'b100: x_alu_result = x_src1 ^ x_state.imm_i_sext;                     // xori
-          3'b110: x_alu_result = x_src1 | x_state.imm_i_sext;                     // ori
-          3'b111: x_alu_result = x_src1 & x_state.imm_i_sext;                     // andi
-          3'b001: x_alu_result = x_src1 << x_state.insn[24:20];                   // slli
+          3'b100: x_alu_result = x_src1 ^ x_state.imm_i_sext;     // xori
+          3'b110: x_alu_result = x_src1 | x_state.imm_i_sext;                                // ori
+          3'b111: x_alu_result = x_src1 & x_state.imm_i_sext;              // andi
+          3'b001: x_alu_result = x_src1 << x_state.insn[24:20];         // slli
           3'b101: begin
             if (x_state.funct7 == 7'b0100000) begin
               x_alu_result = $signed(x_src1) >>> x_state.insn[24:20];             // srai
@@ -359,6 +368,7 @@ module DatapathPipelined (
             end
           end
           3'b001: x_alu_result = x_src1 << x_src2[4:0];                           // sll
+
           3'b010: x_alu_result = ($signed(x_src1) < $signed(x_src2)) ? 32'd1 : 32'd0; // slt
           3'b011: x_alu_result = (x_src1 < x_src2) ? 32'd1 : 32'd0;               // sltu
           3'b100: x_alu_result = x_src1 ^ x_src2;                                  // xor
@@ -516,6 +526,7 @@ module DatapathPipelined (
         x_state <= '{
           pc: decode_state.pc,
           insn: decode_state.insn,
+          
           cycle_status: decode_state.cycle_status,
           rs1: d_rs1,
           rs2: d_rs2,
