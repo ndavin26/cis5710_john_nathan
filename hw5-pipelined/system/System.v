@@ -107,9 +107,9 @@ module DatapathPipelined (
 	store_data_to_dmem,
 	store_we_to_dmem,
 	halt,
-	trace_writeback_pc,
-	trace_writeback_insn,
-	trace_writeback_cycle_status
+	trace_completed_pc,
+	trace_completed_insn,
+	trace_completed_cycle_status
 );
 	reg _sv2v_0;
 	input wire clk;
@@ -121,9 +121,9 @@ module DatapathPipelined (
 	output reg [31:0] store_data_to_dmem;
 	output reg [3:0] store_we_to_dmem;
 	output reg halt;
-	output reg [31:0] trace_writeback_pc;
-	output reg [31:0] trace_writeback_insn;
-	output reg [31:0] trace_writeback_cycle_status;
+	output reg [31:0] trace_completed_pc;
+	output reg [31:0] trace_completed_insn;
+	output reg [31:0] trace_completed_cycle_status;
 	localparam [6:0] OpcodeBranch = 7'b1100011;
 	localparam [6:0] OpcodeRegImm = 7'b0010011;
 	localparam [6:0] OpcodeRegReg = 7'b0110011;
@@ -294,9 +294,9 @@ module DatapathPipelined (
 	always @(*) begin
 		if (_sv2v_0)
 			;
-		trace_writeback_cycle_status = w_state[70-:32];
-		trace_writeback_pc = (w_state[70-:32] == 32'd1 ? w_state[134-:32] : 32'd0);
-		trace_writeback_insn = (w_state[70-:32] == 32'd1 ? w_state[102-:32] : 32'd0);
+		trace_completed_cycle_status = w_state[70-:32];
+		trace_completed_pc = (w_state[70-:32] == 32'd1 ? w_state[134-:32] : 32'd0);
+		trace_completed_insn = (w_state[70-:32] == 32'd1 ? w_state[102-:32] : 32'd0);
 		halt = (w_state[70-:32] == 32'd1) && w_state[0];
 		rf_rd = w_state[38-:5];
 		rf_rd_data = w_state[32-:32];
@@ -385,8 +385,6 @@ module MemorySingleCycle (
 		end
 	initial _sv2v_0 = 0;
 endmodule
-`default_nettype none
-`default_nettype none
 module SystemResourceCheck (
 	external_clk_25MHz,
 	btn,
@@ -431,8 +429,8 @@ module SystemResourceCheck (
 		.store_we_to_dmem(mem_data_we),
 		.load_data_from_dmem(mem_data_loaded_value),
 		.halt(led[0]),
-		.trace_writeback_pc(trace_writeback_pc),
-		.trace_writeback_insn(trace_writeback_insn),
-		.trace_writeback_cycle_status(trace_writeback_cycle_status)
+		.trace_completed_pc(trace_writeback_pc),
+		.trace_completed_insn(trace_writeback_insn),
+		.trace_completed_cycle_status(trace_writeback_cycle_status)
 	);
 endmodule

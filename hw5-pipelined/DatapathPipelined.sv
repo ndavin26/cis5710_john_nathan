@@ -143,11 +143,11 @@ module DatapathPipelined (
     output logic halt,
 
     // The PC of the insn currently in Writeback. 0 if not a valid insn.
-    output logic [`REG_SIZE] trace_writeback_pc,
+    output logic [`REG_SIZE] trace_completed_pc,
     // The bits of the insn currently in Writeback. 0 if not a valid insn.
-    output logic [`INSN_SIZE] trace_writeback_insn,
+    output logic [`INSN_SIZE] trace_completed_insn,
     // The status of the insn (or stall) currently in Writeback. See the cycle_status.sv file for valid values.
-    output cycle_status_e trace_writeback_cycle_status
+    output cycle_status_e trace_completed_cycle_status
 );
 
   // opcodes - see section 19 of RiscV spec
@@ -406,9 +406,9 @@ module DatapathPipelined (
 
   // WB outputs / side effects
   always_comb begin
-    trace_writeback_cycle_status = w_state.cycle_status;
-    trace_writeback_pc = (w_state.cycle_status == CYCLE_NO_STALL) ? w_state.pc : 32'd0;
-    trace_writeback_insn = (w_state.cycle_status == CYCLE_NO_STALL) ? w_state.insn : 32'd0;
+    trace_completed_cycle_status = w_state.cycle_status;
+    trace_completed_pc = (w_state.cycle_status == CYCLE_NO_STALL) ? w_state.pc : 32'd0;
+    trace_completed_insn = (w_state.cycle_status == CYCLE_NO_STALL) ? w_state.insn : 32'd0;
     halt = (w_state.cycle_status == CYCLE_NO_STALL) && w_state.is_ecall;
 
     rf_rd = w_state.rd;
@@ -618,10 +618,11 @@ module Processor (
     input  wire  clk,
     input  wire  rst,
     output logic halt,
-    output wire [`REG_SIZE] trace_writeback_pc,
-    output wire [`INSN_SIZE] trace_writeback_insn,
-    output cycle_status_e trace_writeback_cycle_status
+    output wire [`REG_SIZE] trace_completed_pc,
+    output wire [`INSN_SIZE] trace_completed_insn,
+    output cycle_status_e trace_completed_cycle_status
 );
+
 
   wire [`INSN_SIZE] insn_from_imem;
   wire [`REG_SIZE] pc_to_imem, mem_data_addr, mem_data_loaded_value, mem_data_to_write;
@@ -656,9 +657,10 @@ module Processor (
       .store_we_to_dmem(mem_data_we),
       .load_data_from_dmem(mem_data_loaded_value),
       .halt(halt),
-      .trace_writeback_pc(trace_writeback_pc),
-      .trace_writeback_insn(trace_writeback_insn),
-      .trace_writeback_cycle_status(trace_writeback_cycle_status)
+      .trace_completed_pc(trace_completed_pc),
+      .trace_completed_insn(trace_completed_insn),
+      .trace_completed_cycle_status(trace_completed_cycle_status)
   );
+
 
 endmodule
