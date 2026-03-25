@@ -108,6 +108,7 @@ typedef struct packed {
   logic [`REG_SIZE] rs2_val;
   logic [`REG_SIZE] imm_i_sext;
   logic [`REG_SIZE] imm_b_sext;
+  logic [`REG_SIZE] imm_s_sext;
   logic [`REG_SIZE] imm_u;
   logic [2:0] funct3;
   logic [6:0] funct7;
@@ -115,14 +116,17 @@ typedef struct packed {
   logic reg_write;
   logic is_branch;
   logic is_ecall;
+  logic is_load;
 } stage_execute_t;
 
 typedef struct packed {
   logic [`REG_SIZE] pc;
   logic [`INSN_SIZE] insn;
   cycle_status_e cycle_status;
+  logic [4:0] rs2;
   logic [4:0] rd;
   logic reg_write;
+  logic [`REG_SIZE] rs2_val;
   logic [`REG_SIZE] rd_value;
   logic is_ecall;
 } stage_memory_t;
@@ -159,6 +163,9 @@ module DatapathPipelined (
 
   localparam bit [`OPCODE_SIZE] OpcodeAuipc = 7'b00_101_11;
   localparam bit [`OPCODE_SIZE] OpcodeLui = 7'b01_101_11;
+
+  localparam bit [`OPCODE_SIZE] OpcodeLoad    = 7'b00_000_11;
+  localparam bit [`OPCODE_SIZE] OpcodeStore   = 7'b01_000_11;
 
   // cycle counter, not really part of any stage but useful for orienting within GtkWave
   // do not rename this as the testbench uses this value
@@ -216,10 +223,12 @@ module DatapathPipelined (
 
   wire [11:0] d_imm_i = decode_state.insn[31:20];
   wire [12:0] d_imm_b = {decode_state.insn[31], decode_state.insn[7], decode_state.insn[30:25], decode_state.insn[11:8], 1'b0};
+  wire [11:0] d_imm_s = {decode_state.insn[31:25], decode_state.insn[11:7]};
   wire [19:0] d_imm_u_raw = decode_state.insn[31:12];
 
   wire [`REG_SIZE] d_imm_i_sext = {{20{d_imm_i[11]}}, d_imm_i};
   wire [`REG_SIZE] d_imm_b_sext = {{19{d_imm_b[12]}}, d_imm_b};
+  wire [`REG_SIZE] d_imm_s_sext = {{20{d_imm_s[11]}}, d_imm_s};
   wire [`REG_SIZE] d_imm_u = {d_imm_u_raw, 12'b0};
 
   // Register file reads happen in Decode. Testbench requires the instance name `rf`.
@@ -252,7 +261,13 @@ module DatapathPipelined (
   wire d_is_branch = (d_opcode == OpcodeBranch);
   wire d_is_ecall = (d_opcode == OpcodeEnviron) && (decode_state.insn[31:7] == 25'd0);
 
-  wire d_reg_write = d_is_lui || d_is_auipc || d_is_regimm || d_is_regreg;
+  wire d_is_load = (d_opcode == OpcodeLoad);
+  wire d_is_store = (d_opcode == OpcodeStore);
+
+  wire d_reg_write = d_is_lui || d_is_auipc || d_is_regimm || d_is_regreg || d_is_load;
+
+  wire d_load_stall = x_state.is_load && x_state.rd != 5'd0 && ((x_state.rd == d_rs1) || (x_state.rd == d_rs2)) 
+  && !(d_is_store && x_state.rd == d_rs2 && x_state.rd != d_rs1);
 
   /*****************/
   /* EXECUTE STAGE */
@@ -267,56 +282,6 @@ module DatapathPipelined (
       .insn  (x_state.insn),
       .disasm(x_disasm)
   );
-
-  /****************/
-  /* MEMORY STAGE */
-  /****************/
-
-  stage_memory_t m_state;
-
-  wire [255:0] m_disasm;
-  Disasm #(
-      .PREFIX("M")
-  ) disasm_3memory (
-      .insn  (m_state.insn),
-      .disasm(m_disasm)
-  );
-
-  /*******************/
-  /* WRITEBACK STAGE */
-  /*******************/
-
-  stage_writeback_t w_state;
-
-  wire [255:0] w_disasm;
-  Disasm #(
-      .PREFIX("W")
-  ) disasm_4writeback (
-      .insn  (w_state.insn),
-      .disasm(w_disasm)
-  );
-
-  // Execute-stage forwarding (MX and WX bypasses)
-  logic [`REG_SIZE] x_src1;
-  logic [`REG_SIZE] x_src2;
-  always_comb begin
-    x_src1 = x_state.rs1_val;
-    if ((x_state.rs1 != 5'd0) && m_state.reg_write && (m_state.rd == x_state.rs1)) begin
-
-      x_src1 = m_state.rd_value;
-    end else if ((x_state.rs1 != 5'd0) && w_state.reg_write && (w_state.rd == x_state.rs1)) begin
-      x_src1 = w_state.rd_value;
-    end
-
-
-    x_src2 = x_state.rs2_val;
-    if ((x_state.rs2 != 5'd0) && m_state.reg_write && (m_state.rd == x_state.rs2)) begin
-      x_src2 = m_state.rd_value;
-    end else if ((x_state.rs2 != 5'd0) && w_state.reg_write && (w_state.rd == x_state.rs2)) begin
-      x_src2 = w_state.rd_value;
-    end
-
-  end
 
   logic [`REG_SIZE] x_alu_result;
   logic x_branch_taken;
@@ -397,6 +362,14 @@ module DatapathPipelined (
         endcase
       end
 
+      OpcodeLoad: begin
+        x_alu_result = x_src1 + x_state.imm_i_sext; // lb, lh, lw, lbu, lhu all use the same ALU calculation
+      end
+
+      OpcodeStore: begin
+        x_alu_result = x_src1 + x_state.imm_s_sext; // sb, sh, sw all use the same ALU calculation
+      end
+
       default: begin
         x_alu_result = 32'd0;
       end
@@ -407,14 +380,61 @@ module DatapathPipelined (
     end
   end
 
-  // dmem unused for Milestone 1
+
+  /****************/
+  /* MEMORY STAGE */
+  /****************/
+
+  stage_memory_t m_state;
+
+  wire [255:0] m_disasm;
+  Disasm #(
+      .PREFIX("M")
+  ) disasm_3memory (
+      .insn  (m_state.insn),
+      .disasm(m_disasm)
+  );
+
+  // set all dmem outputs / side effects to a default value, then override as needed based on the instruction type
   always_comb begin
     addr_to_dmem = 32'd0;
     store_data_to_dmem = 32'd0;
     store_we_to_dmem = 4'b0000;
+    m_result_to_wb = m_state.rd_value;
+
+    case (m_state.opcode)
+      OpcodeLoad: begin
+        addr_to_dmem = m_state.rd_value;
+        m_results_to_wb = load_data_from_dmem;
+      end
+      OpcodeStore: begin
+        addr_to_dmem = m_state.rd_value;
+        store_data_to_dmem = m_src2;
+        case (m_state.funct3)
+          3'b000: store_we_to_dmem = 4'b0001; // sb
+          3'b001: store_we_to_dmem = 4'b0011; // sh
+          3'b010: store_we_to_dmem = 4'b1111; // sw
+          default: store_we_to_dmem = 4'b0000;
+        endcase
+      end
+    endcase
   end
 
-  // WB outputs / side effects
+  /*******************/
+  /* WRITEBACK STAGE */
+  /*******************/
+
+  stage_writeback_t w_state;
+
+  wire [255:0] w_disasm;
+  Disasm #(
+      .PREFIX("W")
+  ) disasm_4writeback (
+      .insn  (w_state.insn),
+      .disasm(w_disasm)
+  );
+
+    // WB outputs / side effects
   always_comb begin
     trace_completed_cycle_status = w_state.cycle_status;
     trace_completed_pc = (w_state.cycle_status == CYCLE_NO_STALL) ? w_state.pc : 32'd0;
@@ -425,6 +445,39 @@ module DatapathPipelined (
     rf_rd_data = w_state.rd_value;
     rf_we = (w_state.cycle_status == CYCLE_NO_STALL) && w_state.reg_write;
   end
+
+
+  // Execute-stage forwarding (MX and WX bypasses)
+  logic [`REG_SIZE] x_src1;
+  logic [`REG_SIZE] x_src2;
+  always_comb begin
+    x_src1 = x_state.rs1_val;
+    if ((x_state.rs1 != 5'd0) && m_state.reg_write && (m_state.rd == x_state.rs1)) begin
+
+      x_src1 = m_state.rd_value;
+    end else if ((x_state.rs1 != 5'd0) && w_state.reg_write && (w_state.rd == x_state.rs1)) begin
+      x_src1 = w_state.rd_value;
+    end
+
+    x_src2 = x_state.rs2_val;
+    if ((x_state.rs2 != 5'd0) && m_state.reg_write && (m_state.rd == x_state.rs2)) begin
+      x_src2 = m_state.rd_value;
+    end else if ((x_state.rs2 != 5'd0) && w_state.reg_write && (w_state.rd == x_state.rs2)) begin
+      x_src2 = w_state.rd_value;
+    end
+
+  end
+
+  // Memory-stage forwarding (MW bypass for loads)
+  logic [`REG_SIZE] m_src2;
+  always_comb begin
+    m_src2 = m_state.rs2_val;
+    if ((m_state.rs2 != 5'd0) && w_state.reg_write && (w_state.rd == m_state.rs2)) begin
+      m_src2 = w_state.rd_value;
+    end
+
+  end
+
 
   // Pipeline registers
   always_ff @(posedge clk) begin
@@ -444,6 +497,7 @@ module DatapathPipelined (
         rs2_val: 32'd0,
         imm_i_sext: 32'd0,
         imm_b_sext: 32'd0,
+        imm_s_sext: 32'd0,
         imm_u: 32'd0,
         funct3: 3'd0,
         funct7: 7'd0,
@@ -472,12 +526,24 @@ module DatapathPipelined (
       };
     end else begin
       // older stages always advance
-      w_state <= m_state;
+      w_state <= '{
+        pc: m_state.pc,
+        insn: m_state.insn,
+        cycle_status: m_state.cycle_status,
+        rd: m_state.rd,
+        rs2: m_state.rs2,
+        rs2_val: m_state.rs2_val,
+        reg_write: m_state.reg_write,
+        rd_value: m_result_to_wb,
+        is_ecall: m_state.is_ecall
+      };
       m_state <= '{
         pc: x_state.pc,
         insn: x_state.insn,
         cycle_status: x_state.cycle_status,
         rd: x_state.rd,
+        rs2: x_state.rs2,
+        rs2_val: x_src2,
         reg_write: x_state.reg_write,
         rd_value: x_alu_result,
         is_ecall: x_state.is_ecall
@@ -513,7 +579,39 @@ module DatapathPipelined (
           is_branch: 1'b0,
           is_ecall: 1'b0
         };
-      end else begin
+      end else if (d_load_stall) begin
+        f_pc_current <= f_pc_current;
+        f_cycle_status <= CYCLE_LOAD_USE_STALL;
+
+        decode_state <= '{
+          pc: decode_state.pc,
+          insn: decode_state.insn,
+          cycle_status: CYCLE_LOAD_USE_STALL
+        };
+
+        x_state <= '{
+          pc: 32'd0,
+          insn: 32'd0,
+          cycle_status: CYCLE_LOAD_USE_STALL,
+          rs1: 5'd0,
+          rs2: 5'd0,
+          rd: 5'd0,
+          rs1_val: 32'd0,
+          rs2_val: 32'd0,
+          imm_i_sext: 32'd0,
+          imm_b_sext: 32'd0,
+          imm_s_sext: 32'd0,
+          imm_u: 32'd0,
+          funct3: 3'd0,
+          funct7: 7'd0,
+          opcode: 7'd0,
+          reg_write: 1'b0,
+          is_branch: 1'b0,
+          is_ecall: 1'b0,
+          is_load: 1'b0
+        };
+      end
+      else begin
         f_pc_current <= f_pc_current + 32'd4;
         f_cycle_status <= CYCLE_NO_STALL;
 
@@ -535,13 +633,15 @@ module DatapathPipelined (
           rs2_val: rf_rs2_data,
           imm_i_sext: d_imm_i_sext,
           imm_b_sext: d_imm_b_sext,
+          imm_s_sext: d_imm_s_sext,
           imm_u: d_imm_u,
           funct3: d_funct3,
           funct7: d_funct7,
           opcode: d_opcode,
           reg_write: d_reg_write,
           is_branch: d_is_branch,
-          is_ecall: d_is_ecall
+          is_ecall: d_is_ecall,
+          is_load: d_is_load
         };
       end
     end
@@ -580,6 +680,8 @@ module MemorySingleCycle #(
 
   // memory is arranged as an array of 4B words
   logic [`REG_SIZE] mem_array[NUM_WORDS];
+
+
 
 `ifdef SYNTHESIS
   initial begin
