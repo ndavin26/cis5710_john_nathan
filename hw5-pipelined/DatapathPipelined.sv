@@ -126,6 +126,9 @@ typedef struct packed {
   logic [4:0] rs2;
   logic [4:0] rd;
   logic reg_write;
+  logic [`OPCODE_SIZE] opcode;
+  logic [2:0] funct3;
+  logic [6:0] funct7;
   logic [`REG_SIZE] rs2_val;
   logic [`REG_SIZE] rd_value;
   logic is_ecall;
@@ -405,7 +408,14 @@ module DatapathPipelined (
     case (m_state.opcode)
       OpcodeLoad: begin
         addr_to_dmem = m_state.rd_value;
-        m_results_to_wb = load_data_from_dmem;
+          case (m_state.funct3)
+            3'b000: m_result_to_wb = {{24{load_data_from_dmem[7]}}, load_data_from_dmem[7:0}}; 
+            3'b100: m_result_to_wb = {24'd0, load_data_from_dmem[7:0]};
+            3'b001: m_result_to_wb = {{16{load_data_from_dmem[15]}}, load_data_from_dmem[15:0}};
+            3'b101: m_result_to_wb = {16'd0, load_data_from_dmem[15:0]};
+            3'b010: m_result_to_wb = load_data_from_dmem;
+            default: m_result_to_wb = 32'd0;
+          endcase
       end
       OpcodeStore: begin
         addr_to_dmem = m_state.rd_value;
@@ -544,6 +554,9 @@ module DatapathPipelined (
         rd: x_state.rd,
         rs2: x_state.rs2,
         rs2_val: x_src2,
+        opcode: x_state.opcode,
+        funct3: x_state.funct3,
+        funct7: x_state.funct7,
         reg_write: x_state.reg_write,
         rd_value: x_alu_result,
         is_ecall: x_state.is_ecall
