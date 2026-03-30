@@ -289,6 +289,8 @@ module DatapathPipelined (
   logic [`REG_SIZE] x_alu_result;
   logic x_branch_taken;
   logic [`REG_SIZE] x_branch_target;
+  logic [`REG_SIZE] x_src1;
+  logic [`REG_SIZE] x_src2;
 
   always_comb begin
     x_alu_result = 32'd0;
@@ -398,6 +400,8 @@ module DatapathPipelined (
       .disasm(m_disasm)
   );
 
+  logic [`REG_SIZE] m_result_to_wb;
+
   // set all dmem outputs / side effects to a default value, then override as needed based on the instruction type
   always_comb begin
     addr_to_dmem = 32'd0;
@@ -407,25 +411,86 @@ module DatapathPipelined (
 
     case (m_state.opcode)
       OpcodeLoad: begin
-        addr_to_dmem = m_state.rd_value;
+        addr_to_dmem = {m_state.rd_value[31:2], 2'b00};
           case (m_state.funct3)
-            3'b000: m_result_to_wb = {{24{load_data_from_dmem[7]}}, load_data_from_dmem[7:0}}; 
-            3'b100: m_result_to_wb = {24'd0, load_data_from_dmem[7:0]};
-            3'b001: m_result_to_wb = {{16{load_data_from_dmem[15]}}, load_data_from_dmem[15:0}};
-            3'b101: m_result_to_wb = {16'd0, load_data_from_dmem[15:0]};
+            3'b000: begin
+              case (m_state.rd_value[1:0])
+                2'b00: m_result_to_wb = {{24{load_data_from_dmem[7]}}, load_data_from_dmem[7:0]}; // lb from byte 0
+                2'b01: m_result_to_wb = {{24{load_data_from_dmem[15]}}, load_data_from_dmem[15:8]}; // lb from byte 1
+                2'b10: m_result_to_wb = {{24{load_data_from_dmem[23]}}, load_data_from_dmem[23:16]}; // lb from byte 2
+                2'b11: m_result_to_wb = {{24{load_data_from_dmem[31]}}, load_data_from_dmem[31:24]}; // lb from byte 3
+                default: begin
+                  m_result_to_wb = 32'd0;
+                end 
+              endcase
+            end
+            3'b100: begin 
+              case (m_state.rd_value[1:0])
+                2'b00: m_result_to_wb = {24'd0, load_data_from_dmem[7:0]}; // lbu from byte 0
+                2'b01: m_result_to_wb = {24'd0, load_data_from_dmem[15:8]}; // lbu from byte 1
+                2'b10: m_result_to_wb = {24'd0, load_data_from_dmem[23:16]}; // lbu from byte 2
+                2'b11: m_result_to_wb = {24'd0, load_data_from_dmem[31:24]}; // lbu from byte 3
+                default: begin
+                  m_result_to_wb = 32'd0;
+                end
+              endcase
+                end
+            3'b001: begin
+              case (m_state.rd_value[1])
+                1'b0: m_result_to_wb = {{16{load_data_from_dmem[15]}}, load_data_from_dmem[15:0]}; // lh from halfword 0
+                1'b1: m_result_to_wb = {{16{load_data_from_dmem[31]}}, load_data_from_dmem[31:16]}; // lh from halfword 1
+                default: begin
+                  m_result_to_wb = 32'd0;
+                end
+              endcase
+            end
+            3'b101: begin
+              case (m_state.rd_value[1])
+                1'b0: m_result_to_wb = {16'd0, load_data_from_dmem[15:0]}; // lhu from halfword 0
+                1'b1: m_result_to_wb = {16'd0, load_data_from_dmem[31:16]}; // lhu from halfword 1
+                default:begin
+                  m_result_to_wb = 32'd0;
+                end
+              endcase
+            end
             3'b010: m_result_to_wb = load_data_from_dmem;
             default: m_result_to_wb = 32'd0;
           endcase
       end
       OpcodeStore: begin
-        addr_to_dmem = m_state.rd_value;
-        store_data_to_dmem = m_src2;
+        addr_to_dmem = {m_state.rd_value[31:2], 2'b00};
         case (m_state.funct3)
-          3'b000: store_we_to_dmem = 4'b0001; // sb
-          3'b001: store_we_to_dmem = 4'b0011; // sh
-          3'b010: store_we_to_dmem = 4'b1111; // sw
-          default: store_we_to_dmem = 4'b0000;
+          3'b000: begin
+            store_data_to_dmem = {4{m_src2[7:0]}};
+            case (m_state.rd_value[1:0])
+              2'b00: store_we_to_dmem = 4'b0001; // sb to byte 0
+              2'b01: store_we_to_dmem = 4'b0010; // sb to byte 1
+              2'b10: store_we_to_dmem = 4'b0100; // sb to byte 2
+              2'b11: store_we_to_dmem = 4'b1000; // sb to byte 3
+              default: begin
+                store_we_to_dmem = 4'b0000;
+              end
+            endcase
+          end
+          3'b001: begin
+            store_data_to_dmem = {2{m_src2[15:0]}};
+            case (m_state.rd_value[1])
+              1'b0: store_we_to_dmem = 4'b0011; // sh to halfword 0
+              1'b1: store_we_to_dmem = 4'b1100; // sh to halfword 1
+              default: store_data_to_dmem = 32'd0;
+            endcase
+          end
+          3'b010: begin
+            store_we_to_dmem = 4'b1111; // sw
+            store_data_to_dmem = m_src2;
+          end
+          default: begin
+            store_we_to_dmem = 4'b0000;
+            store_data_to_dmem = 32'd0;
+          end
         endcase
+      end
+      default: begin
       end
     endcase
   end
@@ -453,13 +518,11 @@ module DatapathPipelined (
 
     rf_rd = w_state.rd;
     rf_rd_data = w_state.rd_value;
-    rf_we = (w_state.cycle_status == CYCLE_NO_STALL) && w_state.reg_write;
+    rf_we = w_state.reg_write;
   end
 
 
   // Execute-stage forwarding (MX and WX bypasses)
-  logic [`REG_SIZE] x_src1;
-  logic [`REG_SIZE] x_src2;
   always_comb begin
     x_src1 = x_state.rs1_val;
     if ((x_state.rs1 != 5'd0) && m_state.reg_write && (m_state.rd == x_state.rs1)) begin
@@ -514,13 +577,19 @@ module DatapathPipelined (
         opcode: 7'd0,
         reg_write: 1'b0,
         is_branch: 1'b0,
-        is_ecall: 1'b0
+        is_ecall: 1'b0,
+        is_load: 1'b0
       };
       m_state <= '{
         pc: 32'd0,
         insn: 32'd0,
         cycle_status: CYCLE_RESET,
         rd: 5'd0,
+        rs2: 5'd0,
+        rs2_val: 32'd0,
+        opcode: 7'd0,
+        funct3: 3'd0,
+        funct7: 7'd0,
         reg_write: 1'b0,
         rd_value: 32'd0,
         is_ecall: 1'b0
@@ -530,6 +599,11 @@ module DatapathPipelined (
         insn: 32'd0,
         cycle_status: CYCLE_RESET,
         rd: 5'd0,
+        rs2: 5'd0,
+        rs2_val: 32'd0,
+        opcode: 7'd0,
+        funct3: 3'd0,
+        funct7: 7'd0,
         reg_write: 1'b0,
         rd_value: 32'd0,
         is_ecall: 1'b0
@@ -543,6 +617,9 @@ module DatapathPipelined (
         rd: m_state.rd,
         rs2: m_state.rs2,
         rs2_val: m_state.rs2_val,
+        opcode: m_state.opcode,
+        funct3: m_state.funct3,
+        funct7: m_state.funct7,
         reg_write: m_state.reg_write,
         rd_value: m_result_to_wb,
         is_ecall: m_state.is_ecall
@@ -567,6 +644,7 @@ module DatapathPipelined (
         f_pc_current <= x_branch_target;
         f_cycle_status <= CYCLE_NO_STALL;
 
+
         decode_state <= '{
           pc: 32'd0,
           insn: 32'd0,
@@ -584,28 +662,30 @@ module DatapathPipelined (
           rs2_val: 32'd0,
           imm_i_sext: 32'd0,
           imm_b_sext: 32'd0,
+          imm_s_sext: 32'd0,
           imm_u: 32'd0,
           funct3: 3'd0,
           funct7: 7'd0,
           opcode: 7'd0,
           reg_write: 1'b0,
           is_branch: 1'b0,
-          is_ecall: 1'b0
+          is_ecall: 1'b0,
+          is_load: 1'b0
         };
       end else if (d_load_stall) begin
         f_pc_current <= f_pc_current;
-        f_cycle_status <= CYCLE_LOAD_USE_STALL;
+        f_cycle_status <= CYCLE_LOAD2USE;
 
         decode_state <= '{
           pc: decode_state.pc,
           insn: decode_state.insn,
-          cycle_status: CYCLE_LOAD_USE_STALL
+          cycle_status: CYCLE_LOAD2USE
         };
 
         x_state <= '{
           pc: 32'd0,
           insn: 32'd0,
-          cycle_status: CYCLE_LOAD_USE_STALL,
+          cycle_status: CYCLE_NO_STALL,
           rs1: 5'd0,
           rs2: 5'd0,
           rd: 5'd0,
