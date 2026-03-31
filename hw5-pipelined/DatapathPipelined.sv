@@ -17,8 +17,10 @@
 `include "../hw3-singlecycle/RvDisassembler.sv"
 `endif
 `include "../hw2b-cla/CarryLookaheadAdder.sv"
-`include "../hw4-multicycle/DividerUnsignedPipelined.sv"
+`include "../hw4-multicycle/DividerSignedPipelined.sv"
 `include "../hw3-singlecycle/cycle_status.sv"
+`include "PipelineStageStructs.sv"
+`include "FunctionCalls.sv"
 
 module Disasm #(
     byte PREFIX = "D"
@@ -89,52 +91,6 @@ module RegFile (
     end
   end
 endmodule
-
-/** state at the start of Decode stage */
-typedef struct packed {
-  logic [`REG_SIZE] pc;
-  logic [`INSN_SIZE] insn;
-  cycle_status_e cycle_status;
-} stage_decode_t;
-
-typedef struct packed {
-  logic [`REG_SIZE] pc;
-  logic [`INSN_SIZE] insn;
-  cycle_status_e cycle_status;
-  logic [4:0] rs1;
-  logic [4:0] rs2;
-  logic [4:0] rd;
-  logic [`REG_SIZE] rs1_val;
-  logic [`REG_SIZE] rs2_val;
-  logic [`REG_SIZE] imm_i_sext;
-  logic [`REG_SIZE] imm_b_sext;
-  logic [`REG_SIZE] imm_s_sext;
-  logic [`REG_SIZE] imm_u;
-  logic [2:0] funct3;
-  logic [6:0] funct7;
-  logic [`OPCODE_SIZE] opcode;
-  logic reg_write;
-  logic is_branch;
-  logic is_ecall;
-  logic is_load;
-} stage_execute_t;
-
-typedef struct packed {
-  logic [`REG_SIZE] pc;
-  logic [`INSN_SIZE] insn;
-  cycle_status_e cycle_status;
-  logic [4:0] rs2;
-  logic [4:0] rd;
-  logic reg_write;
-  logic [`OPCODE_SIZE] opcode;
-  logic [2:0] funct3;
-  logic [6:0] funct7;
-  logic [`REG_SIZE] rs2_val;
-  logic [`REG_SIZE] rd_value;
-  logic is_ecall;
-} stage_memory_t;
-
-typedef stage_memory_t stage_writeback_t;
 
 module DatapathPipelined (
     input wire clk,
@@ -267,7 +223,9 @@ module DatapathPipelined (
   wire d_is_load = (d_opcode == OpcodeLoad);
   wire d_is_store = (d_opcode == OpcodeStore);
 
-  wire d_reg_write = d_is_lui || d_is_auipc || d_is_regimm || d_is_regreg || d_is_load;
+  wire d_is_div = (d_opcode == OpcodeRegReg) && (d_funct7 == 7'b0000001) && (d_funct3 == 3'b100);
+
+  wire d_reg_write = d_is_lui || d_is_auipc || d_is_regimm || d_is_regreg || d_is_load || d_is_div;
 
   wire d_load_stall = x_state.is_load && x_state.rd != 5'd0 && ((x_state.rd == d_rs1) || (x_state.rd == d_rs2)) 
   && !(d_is_store && x_state.rd == d_rs2 && x_state.rd != d_rs1);
@@ -291,6 +249,76 @@ module DatapathPipelined (
   logic [`REG_SIZE] x_branch_target;
   logic [`REG_SIZE] x_src1;
   logic [`REG_SIZE] x_src2;
+
+
+  // Divider inputs/outputs and control signals
+
+  logic [`REG_SIZE] div_in_dividend, div_in_divisor;
+  stage_memory_t div_out_m_state;
+
+  logic div_use, div_signed, div_is_rem;
+  logic div_div_by_zero, div_overflow;
+  logic div_a_neg, div_b_neg;
+  logic [`REG_SIZE] div_a_abs, div_b_abs;
+  logic [2:0] div_stage;
+
+  always_comb begin
+      div_in_dividend = 32'b0;
+      div_in_divisor = 32'b0;
+
+      div_use = (insn_divu || insn_remu || insn_div || insn_rem);
+      div_signed = (insn_div  || insn_rem);
+      div_is_rem = (insn_remu || insn_rem);
+
+      div_div_by_zero = div_use && (rs2_data == 32'b0);
+      div_overflow = div_signed && (rs1_data == 32'h8000_0000) && (rs2_data == 32'hFFFF_FFFF);
+
+      div_a_neg = rs1_data[31];
+      div_b_neg = rs2_data[31];
+
+      div_a_abs = div_a_neg ? twos_comp32(rs1_data) : rs1_data;
+      div_b_abs = div_b_neg ? twos_comp32(rs2_data) : rs2_data;
+
+      if (insn_divu || insn_remu) begin
+        div_in_dividend = rs1_data;
+        div_in_divisor = rs2_data;
+      end else if (insn_div || insn_rem) begin
+        div_in_dividend = div_a_abs;
+        div_in_divisor = div_b_abs;
+      end 
+end
+  
+  DividerSignedPipelined u_div(
+    .clk(clk), .rst(rst), .stall(d_load_stall),
+    .i_dividend(div_in_dividend), 
+    .i_divisor(div_in_divisor),
+    .i_x_state(x_state),
+    .i_is_remainder(div_is_rem),
+    .i_is_signed(div_signed),
+    .i_negate_remainder(div_a_neg),
+    .i_negate_quotient(div_a_neg ^ div_b_neg),
+    .o_m_state(div_out_m_state)
+  );
+
+  // Multiplier setup
+  logic signed [63:0] mult_a_s;
+  logic signed [63:0] mult_b_s;
+  logic [63:0] mult_a_u;
+  logic [63:0] mult_b_u;
+  logic signed [63:0] mult_prod_ss;
+  logic signed [63:0] mult_prod_su;
+  logic [63:0] mult_prod_uu;
+
+  always_comb begin
+    mult_a_s = {{32{x_src1[31]}}, x_src1};
+    mult_b_s = {{32{x_src2[31]}}, x_src2};
+    mult_a_u = {32{1'b0}, x_src1};
+    mult_b_u = {32{1'b0}, x_src2};
+
+    mult_prod_ss = mult_a_s * mult_b_s;
+    mult_prod_su = mult_a_s * mult_b_u;
+    mult_prod_uu = mult_a_u * mult_b_u;
+  end
 
   always_comb begin
     x_alu_result = 32'd0;
@@ -331,23 +359,38 @@ module DatapathPipelined (
       OpcodeRegReg: begin
         case (x_state.funct3)
           3'b000: begin
-            if (x_state.funct7 == 7'b0100000) begin
-              x_alu_result = x_src1 - x_src2;                                      // sub
-            end else begin
-              x_alu_result = x_src1 + x_src2;                                      // add
-            end
+            case (x_state.funct7)
+              7'b0000000: x_alu_result = x_src1 + x_src2;                                      // add
+              7'b0100000: x_alu_result = x_src1 - x_src2;                                      // sub
+              7'b0000001: x_alu_result = mult_prod_uu[31:0]; // mul
+              default: x_alu_result = 32'd0;
+            endcase
           end
-          3'b001: x_alu_result = x_src1 << x_src2[4:0];                           // sll
-
-          3'b010: x_alu_result = ($signed(x_src1) < $signed(x_src2)) ? 32'd1 : 32'd0; // slt
-          3'b011: x_alu_result = (x_src1 < x_src2) ? 32'd1 : 32'd0;               // sltu
+          3'b001: 
+            case (x_state.funct7)
+              7'b0000000: x_alu_result = x_src1 << x_src2[4:0];                           // sll
+              7'b0000001: x_alu_result = mult_prod_ss[63:32]; // mulh
+              default: x_alu_result = 32'd0;
+            endcase                         
+          3'b010: 
+           case (x_state.funct7)
+              7'b0000000: x_alu_result = ($signed(x_src1) < $signed(x_src2)) ? 32'd1 : 32'd0; // slt
+              7'b0000001: x_alu_result = mult_prod_su[63:32]; // mulhsu
+              default: x_alu_result = 32'd0;
+            endcase
+          3'b011: 
+            case (x_state.funct7)
+                7'b0000000:x_alu_result = (x_src1 < x_src2) ? 32'd1 : 32'd0;               // sltu
+                7'b0000001:x_alu_result = mult_prod_uu[63:32]; // mulhu
+                default: x_alu_result = 32'd0;
+            endcase
           3'b100: x_alu_result = x_src1 ^ x_src2;                                  // xor
           3'b101: begin
-            if (x_state.funct7 == 7'b0100000) begin
-              x_alu_result = $signed(x_src1) >>> x_src2[4:0];                      // sra
-            end else begin
-              x_alu_result = x_src1 >> x_src2[4:0];                                // srl
-            end
+            case (x_state.funct7)
+              7'b0000000: x_alu_result = x_src1 >> x_src2[4:0];                                // srl
+              7'b0100000: x_alu_result = $signed(x_src1) >>> x_src2[4:0];                      // sra
+              default: x_alu_result = 32'd0;
+            endcase
           end
           3'b110: x_alu_result = x_src1 | x_src2;                                  // or
           3'b111: x_alu_result = x_src1 & x_src2;                                  // and
@@ -578,7 +621,8 @@ module DatapathPipelined (
         reg_write: 1'b0,
         is_branch: 1'b0,
         is_ecall: 1'b0,
-        is_load: 1'b0
+        is_load: 1'b0,
+        is_div: 1'b0
       };
       m_state <= '{
         pc: 32'd0,
@@ -670,7 +714,8 @@ module DatapathPipelined (
           reg_write: 1'b0,
           is_branch: 1'b0,
           is_ecall: 1'b0,
-          is_load: 1'b0
+          is_load: 1'b0,
+          is_div: 1'b0
         };
       end else if (d_load_stall) begin
         f_pc_current <= f_pc_current;
@@ -701,7 +746,8 @@ module DatapathPipelined (
           reg_write: 1'b0,
           is_branch: 1'b0,
           is_ecall: 1'b0,
-          is_load: 1'b0
+          is_load: 1'b0,
+          is_div: 1'b0
         };
       end
       else begin
@@ -734,7 +780,8 @@ module DatapathPipelined (
           reg_write: d_reg_write,
           is_branch: d_is_branch,
           is_ecall: d_is_ecall,
-          is_load: d_is_load
+          is_load: d_is_load,
+          is_div: d_is_div
         };
       end
     end

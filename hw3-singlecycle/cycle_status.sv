@@ -14,6 +14,10 @@
  * be present in a single cycle. All relevant stall conditions should be ORed
  * together.
  */
+
+`ifndef CYCLE_STATUS_SV
+`define CYCLE_STATUS_SV
+
 typedef enum {
   /** invalid value, this should never appear after the initial reset sequence completes */
   CYCLE_INVALID = 0,
@@ -53,3 +57,5 @@ typedef enum {
   CYCLE_DCACHE_MISS = 1024
 
 } cycle_status_e;
+
+`endif // CYCLE_STATUS_SV
