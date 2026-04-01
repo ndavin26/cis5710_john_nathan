@@ -37,6 +37,14 @@ typedef struct packed {
   logic is_ecall;
   logic is_load;
   logic is_div;
+  logic [`REG_SIZE] div_in_dividend;
+  logic [`REG_SIZE] div_in_divisor;
+  logic div_signed;
+  logic div_rem;
+  logic div_div_by_zero;
+  logic div_overflow;
+  logic div_negate_quotient;
+  logic div_negate_remainder;
 } stage_execute_t;
 
 typedef struct packed {
@@ -52,6 +60,7 @@ typedef struct packed {
   logic [`REG_SIZE] rs2_val;
   logic [`REG_SIZE] rd_value;
   logic is_ecall;
+  logic is_div;
 } stage_memory_t;
 
 typedef stage_memory_t stage_writeback_t;

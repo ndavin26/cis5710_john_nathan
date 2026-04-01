@@ -8,23 +8,12 @@
 `include "PipelineStageStructs.sv"
 `include "FunctionCalls.sv"  // Includes twos_comp32 function
 
-
-// quotient = dividend / divisor
-
 // Creates an 8 stage pipelined divider. Each stage performs 4 iterations of the non-restoring division algorithm
 // Registers hold intermediate values and final results are output to a memory stage struct
 module DividerSignedPipelined (
     input wire clk, rst, stall,
-    input wire [`REG_SIZE] i_dividend,
-    input wire [`REG_SIZE] i_divisor,
-    input wire is_remainder,
     input stage_execute_t i_x_state,
-    input wire is_signed,
-    input wire negate_quotient,
-    input wire negate_remainder,
-    output logic [`REG_SIZE] o_remainder,
-    output logic [`REG_SIZE] o_quotient,
-    output stage_execute_t o_m_state
+    output stage_memory_t o_m_state
 );
 
     genvar i;
@@ -38,6 +27,10 @@ module DividerSignedPipelined (
     logic reg_negate_quotient [6:0];
     logic reg_negate_remainder [6:0];
     logic reg_is_remainder [6:0];
+    logic reg_is_div_by_zero [6:0];
+    logic reg_is_overflow [6:0];
+    logic [`REG_SIZE] reg_dividend_in [6:0];
+    logic [`REG_SIZE] reg_divisor_in [6:0];
 
     stage_execute_t reg_state [6:0];
 
@@ -48,14 +41,18 @@ module DividerSignedPipelined (
             wire [`REG_SIZE] out_div, out_rem, out_quo, out_dvr;
             
             // Inputs for this stage. Set to module inputs for first stage and to previous stage's registers for subsequent stages
-            wire [`REG_SIZE] stage_in_div = (i == 0) ? i_dividend : reg_dividend[i-1];
+            wire [`REG_SIZE] stage_in_div = (i == 0) ? i_x_state.div_in_dividend : reg_dividend[i-1];
             wire [`REG_SIZE] stage_in_rem = (i == 0) ? 32'h0      : reg_remainder[i-1];
             wire [`REG_SIZE] stage_in_quo = (i == 0) ? 32'h0      : reg_quotient[i-1];
-            wire [`REG_SIZE] stage_in_dvr = (i == 0) ? i_divisor   : reg_divisor[i-1];
-            wire stage_in_is_signed = (i == 0) ? is_signed : reg_is_signed[i-1];
-            wire stage_in_negate_quotient = (i == 0) ? negate_quotient : reg_negate_quotient[i-1];
-            wire stage_in_negate_remainder = (i == 0) ? negate_remainder : reg_negate_remainder[i-1];
-            wire stage_in_is_remainder = (i == 0) ? is_remainder : reg_is_remainder[i-1];
+            wire [`REG_SIZE] stage_in_dvr = (i == 0) ? i_x_state.div_in_divisor   : reg_divisor[i-1];
+            wire stage_in_is_signed = (i == 0) ? i_x_state.div_signed : reg_is_signed[i-1];
+            wire stage_in_negate_quotient = (i == 0) ? i_x_state.div_negate_quotient : reg_negate_quotient[i-1];
+            wire stage_in_negate_remainder = (i == 0) ? i_x_state.div_negate_remainder : reg_negate_remainder[i-1];
+            wire stage_in_is_remainder = (i == 0) ? i_x_state.div_rem : reg_is_remainder[i-1];
+            wire stage_in_is_div_by_zero = (i == 0) ? i_x_state.div_div_by_zero : reg_is_div_by_zero[i-1];
+            wire stage_in_is_overflow = (i == 0) ? i_x_state.div_overflow : reg_is_overflow[i-1];
+            wire [`REG_SIZE] stage_in_dividend = (i == 0) ? i_x_state.div_in_dividend : reg_dividend_in[i-1];
+            wire [`REG_SIZE] stage_in_divisor = (i == 0) ? i_x_state.div_in_divisor : reg_divisor_in[i-1];
 
             stage_execute_t stage_in_state = (i == 0) ? i_x_state : reg_state[i-1];
 
@@ -73,31 +70,40 @@ module DividerSignedPipelined (
 
             // Updates the values in registers on clock edge
             if (i<7) begin : gen_registers
-            always_ff @(posedge clk) begin
-                
-                if (rst) begin
-                    reg_dividend[i] <= 32'h0;
-                    reg_remainder[i] <= 32'h0;
-                    reg_quotient[i] <= 32'h0;
-                    reg_divisor[i] <= 32'h0;
-                    reg_is_signed[i] <= 1'b0;
-                    reg_negate_quotient[i] <= 1'b0;
-                    reg_negate_remainder[i] <= 1'b0;
-                    reg_is_remainder[i] <= 1'b0;
-                    reg_state[i] <= '0;
+                always_ff @(posedge clk) begin
+                    
+                    if (rst) begin
+                        reg_dividend[i] <= 32'h0;
+                        reg_remainder[i] <= 32'h0;
+                        reg_quotient[i] <= 32'h0;
+                        reg_divisor[i] <= 32'h0;
+                        reg_is_signed[i] <= 1'b0;
+                        reg_negate_quotient[i] <= 1'b0;
+                        reg_negate_remainder[i] <= 1'b0;
+                        reg_is_remainder[i] <= 1'b0;
+                        reg_state[i] <= '0;
+                        reg_is_div_by_zero[i] <= 1'b0;
+                        reg_is_overflow[i] <= 1'b0;
+                        reg_dividend_in[i] <= 32'h0;
+                        reg_divisor_in[i] <= 32'h0;
+                    end
+                    else if (!stall)begin
+                        reg_dividend[i]  <= out_div;
+                        reg_remainder[i] <= out_rem;
+                        reg_quotient[i]  <= out_quo;
+                        reg_divisor[i]   <= out_dvr;
+                        reg_is_signed[i] <= stage_in_is_signed;
+                        reg_negate_quotient[i] <= stage_in_negate_quotient;
+                        reg_negate_remainder[i] <= stage_in_negate_remainder;
+                        reg_is_remainder[i] <= stage_in_is_remainder;
+                        reg_state[i] <= stage_in_state;
+                        reg_is_div_by_zero[i] <= stage_in_is_div_by_zero;
+                        reg_is_overflow[i] <= stage_in_is_overflow;
+                        reg_dividend_in[i] <= stage_in_dividend;
+                        reg_divisor_in[i] <= stage_in_divisor;
+
+                    end
                 end
-                else if (!stall)begin
-                    reg_dividend[i]  <= out_div;
-                    reg_remainder[i] <= out_rem;
-                    reg_quotient[i]  <= out_quo;
-                    reg_divisor[i]   <= out_dvr;
-                    reg_is_signed[i] <= stage_in_is_signed;
-                    reg_negate_quotient[i] <= stage_in_negate_quotient;
-                    reg_negate_remainder[i] <= stage_in_negate_remainder;
-                    reg_is_remainder[i] <= stage_in_is_remainder;
-                    reg_state[i] <= stage_in_state;
-                end
-            end
             end
 
             // Outputs final results to memory struct at end of pipeline
@@ -116,16 +122,22 @@ module DividerSignedPipelined (
                     o_m_state.rs2_val = stage_in_state.rs2_val;
                     // Output is either quotient or remainder based on input control signal
                     // Negated if signed and negate control signals are set
-                    case (stage_in_is_signed)
-                        1'b0: begin
-                            o_m_state.rd_value = (reg_is_remainder[6]) ? out_rem : out_quo;
-                        end
-                        1'b1: begin
-                            o_m_state.rd_value = (reg_is_remainder[6]) ? ((stage_in_negate_remainder) ? twos_comp32(out_rem) : out_rem) : 
-                            ((stage_in_negate_quotient) ? twos_comp32(out_quo) : out_quo);
-                        end
-                        default: 
-                    endcase
+                    if (stage_in_is_div_by_zero) begin
+                        o_m_state.rd_value = 32'h0; // Could be set to anything since div by zero should be treated as a nop, but set to 0 for consistency
+                    end else if (stage_in_is_overflow) begin
+                        o_m_state.rd_value = (stage_in_is_remainder) ? stage_in_divisor : stage_in_dividend; // On overflow, remainder is set to dividend and quotient is set to divisor
+                    end else begin
+                        case (stage_in_is_signed)
+                            1'b0: begin
+                                o_m_state.rd_value = (reg_is_remainder[6]) ? out_rem : out_quo;
+                            end
+                            1'b1: begin
+                                o_m_state.rd_value = (reg_is_remainder[6]) ? ((stage_in_negate_remainder) ? twos_comp32(out_rem) : out_rem) : 
+                                ((stage_in_negate_quotient) ? twos_comp32(out_quo) : out_quo);
+                            end
+                            default: o_m_state.rd_value = 32'd0;
+                        endcase
+                    end
                 end
             end
         end

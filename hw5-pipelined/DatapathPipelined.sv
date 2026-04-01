@@ -223,12 +223,51 @@ module DatapathPipelined (
   wire d_is_load = (d_opcode == OpcodeLoad);
   wire d_is_store = (d_opcode == OpcodeStore);
 
-  wire d_is_div = (d_opcode == OpcodeRegReg) && (d_funct7 == 7'b0000001) && (d_funct3 == 3'b100);
+  wire d_is_div = (d_opcode == OpcodeRegReg) && (d_funct7 == 7'b0000001) && ((d_funct3 == 3'b100) || (d_funct3 == 3'b110) || (d_funct3 == 3'b111) || (d_funct3 == 3'b101));
 
   wire d_reg_write = d_is_lui || d_is_auipc || d_is_regimm || d_is_regreg || d_is_load || d_is_div;
 
   wire d_load_stall = x_state.is_load && x_state.rd != 5'd0 && ((x_state.rd == d_rs1) || (x_state.rd == d_rs2)) 
   && !(d_is_store && x_state.rd == d_rs2 && x_state.rd != d_rs1);
+
+  // Divider inputs/outputs and control signals
+
+  logic [`REG_SIZE] d_div_in_dividend, d_div_in_divisor;
+  stage_memory_t div_out_m_state;
+
+  logic d_div_use, d_div_signed, d_div_is_rem, d_div_negate_quotient, d_div_negate_remainder;
+  logic d_div_div_by_zero, d_div_overflow;
+  logic d_div_a_neg, d_div_b_neg;
+  logic [`REG_SIZE] d_div_a_abs, d_div_b_abs;
+  logic [7:0] div_stage_busy;
+
+  always_comb begin
+      d_div_in_dividend = 32'b0;
+      d_div_in_divisor = 32'b0;
+
+      d_div_signed = (x_state.opcode == OpcodeRegReg) && (x_state.funct7 == 7'b0000001) && (x_state.funct3[0] == 1'b0);
+      d_div_is_rem = (x_state.opcode == OpcodeRegReg) && (x_state.funct7 == 7'b0000001) && ((x_state.funct3 == 3'b110) || (x_state.funct3 == 3'b111));
+
+      d_div_div_by_zero = d_div_use && (x_state.rs2_val == 32'b0);
+      d_div_overflow = d_div_signed && (x_state.rs1_val == 32'h8000_0000) && (x_state.rs2_val == 32'hFFFF_FFFF);
+
+      d_div_a_neg = x_state.rs1_val[31];
+      d_div_b_neg = x_state.rs2_val[31];
+
+      d_div_a_abs = d_div_a_neg ? twos_comp32(x_state.rs1_val) : x_state.rs1_val;
+      d_div_b_abs = d_div_b_neg ? twos_comp32(x_state.rs2_val) : x_state.rs2_val;
+
+      if (!d_div_signed) begin
+        d_div_in_dividend = x_state.rs1_val;
+        d_div_in_divisor = x_state.rs2_val;
+      end else begin
+        d_div_in_dividend = d_div_a_abs;
+        d_div_in_divisor = d_div_b_abs;
+      end 
+
+      d_div_negate_quotient = d_div_signed && (d_div_a_neg ^ d_div_b_neg);
+      d_div_negate_remainder = d_div_signed && d_div_a_neg;
+  end
 
   /*****************/
   /* EXECUTE STAGE */
@@ -249,54 +288,10 @@ module DatapathPipelined (
   logic [`REG_SIZE] x_branch_target;
   logic [`REG_SIZE] x_src1;
   logic [`REG_SIZE] x_src2;
-
-
-  // Divider inputs/outputs and control signals
-
-  logic [`REG_SIZE] div_in_dividend, div_in_divisor;
-  stage_memory_t div_out_m_state;
-
-  logic div_use, div_signed, div_is_rem;
-  logic div_div_by_zero, div_overflow;
-  logic div_a_neg, div_b_neg;
-  logic [`REG_SIZE] div_a_abs, div_b_abs;
-  logic [2:0] div_stage;
-
-  always_comb begin
-      div_in_dividend = 32'b0;
-      div_in_divisor = 32'b0;
-
-      div_use = (insn_divu || insn_remu || insn_div || insn_rem);
-      div_signed = (insn_div  || insn_rem);
-      div_is_rem = (insn_remu || insn_rem);
-
-      div_div_by_zero = div_use && (rs2_data == 32'b0);
-      div_overflow = div_signed && (rs1_data == 32'h8000_0000) && (rs2_data == 32'hFFFF_FFFF);
-
-      div_a_neg = rs1_data[31];
-      div_b_neg = rs2_data[31];
-
-      div_a_abs = div_a_neg ? twos_comp32(rs1_data) : rs1_data;
-      div_b_abs = div_b_neg ? twos_comp32(rs2_data) : rs2_data;
-
-      if (insn_divu || insn_remu) begin
-        div_in_dividend = rs1_data;
-        div_in_divisor = rs2_data;
-      end else if (insn_div || insn_rem) begin
-        div_in_dividend = div_a_abs;
-        div_in_divisor = div_b_abs;
-      end 
-end
   
   DividerSignedPipelined u_div(
     .clk(clk), .rst(rst), .stall(d_load_stall),
-    .i_dividend(div_in_dividend), 
-    .i_divisor(div_in_divisor),
     .i_x_state(x_state),
-    .i_is_remainder(div_is_rem),
-    .i_is_signed(div_signed),
-    .i_negate_remainder(div_a_neg),
-    .i_negate_quotient(div_a_neg ^ div_b_neg),
     .o_m_state(div_out_m_state)
   );
 
@@ -312,8 +307,8 @@ end
   always_comb begin
     mult_a_s = {{32{x_src1[31]}}, x_src1};
     mult_b_s = {{32{x_src2[31]}}, x_src2};
-    mult_a_u = {32{1'b0}, x_src1};
-    mult_b_u = {32{1'b0}, x_src2};
+    mult_a_u = {{32{1'b0}}, x_src1};
+    mult_b_u = {{32{1'b0}}, x_src2};
 
     mult_prod_ss = mult_a_s * mult_b_s;
     mult_prod_su = mult_a_s * mult_b_u;
@@ -594,6 +589,11 @@ end
 
   end
 
+  wire divider_active = (div_stage_busy != 0);
+  wire next_is_div = d_is_div;
+
+  wire div_stall = divider_active && !next_is_div;
+  wire global_stall = div_stall || d_load_stall;
 
   // Pipeline registers
   always_ff @(posedge clk) begin
@@ -602,6 +602,7 @@ end
       f_cycle_status <= CYCLE_NO_STALL;
 
       decode_state <= '{pc: 32'd0, insn: 32'd0, cycle_status: CYCLE_RESET};
+
       x_state <= '{
         pc: 32'd0,
         insn: 32'd0,
@@ -622,7 +623,15 @@ end
         is_branch: 1'b0,
         is_ecall: 1'b0,
         is_load: 1'b0,
-        is_div: 1'b0
+        is_div: 1'b0,
+        div_signed: 1'b0,
+        div_rem: 1'b0,
+        div_in_dividend: 32'd0,
+        div_in_divisor: 32'd0,
+        div_div_by_zero: 1'b0,
+        div_overflow: 1'b0,
+        div_negate_quotient: 1'b0,
+        div_negate_remainder: 1'b0
       };
       m_state <= '{
         pc: 32'd0,
@@ -636,7 +645,8 @@ end
         funct7: 7'd0,
         reg_write: 1'b0,
         rd_value: 32'd0,
-        is_ecall: 1'b0
+        is_ecall: 1'b0,
+        is_div: 1'b0
       };
       w_state <= '{
         pc: 32'd0,
@@ -650,10 +660,15 @@ end
         funct7: 7'd0,
         reg_write: 1'b0,
         rd_value: 32'd0,
-        is_ecall: 1'b0
+        is_ecall: 1'b0,
+        is_div: 1'b0
       };
+
+      div_stage_busy <= 8'b0;
+
     end else begin
-      // older stages always advance
+      
+      // writeback always advances
       w_state <= '{
         pc: m_state.pc,
         insn: m_state.insn,
@@ -666,28 +681,52 @@ end
         funct7: m_state.funct7,
         reg_write: m_state.reg_write,
         rd_value: m_result_to_wb,
-        is_ecall: m_state.is_ecall
+        is_ecall: m_state.is_ecall,
+        is_div: m_state.is_div
       };
-      m_state <= '{
-        pc: x_state.pc,
-        insn: x_state.insn,
-        cycle_status: x_state.cycle_status,
-        rd: x_state.rd,
-        rs2: x_state.rs2,
-        rs2_val: x_src2,
-        opcode: x_state.opcode,
-        funct3: x_state.funct3,
-        funct7: x_state.funct7,
-        reg_write: x_state.reg_write,
-        rd_value: x_alu_result,
-        is_ecall: x_state.is_ecall
-      };
+
+      div_stage_busy <= div_stage_busy << 1;
+
+      if (div_stage_busy == 0) begin
+        m_state <= '{
+          pc: x_state.pc,
+          insn: x_state.insn,
+          cycle_status: x_state.cycle_status,
+          rd: x_state.rd,
+          rs2: x_state.rs2,
+          rs2_val: x_src2,
+          opcode: x_state.opcode,
+          funct3: x_state.funct3,
+          funct7: x_state.funct7,
+          reg_write: x_state.reg_write,
+          rd_value: x_alu_result,
+          is_ecall: x_state.is_ecall,
+          is_div: x_state.is_div
+        };
+      end else if (div_out_m_state.is_div) begin
+        m_state <= div_out_m_state;
+      end else begin
+        m_state <= '{
+          pc: 32'd0,
+          insn: 32'd0,
+          cycle_status: CYCLE_RESET,
+          rd: 5'd0,
+          rs2: 5'd0,
+          rs2_val: 32'd0,
+          opcode: 7'd0,
+          funct3: 3'd0,
+          funct7: 7'd0,
+          reg_write: 1'b0,
+          rd_value: 32'd0,
+          is_ecall: 1'b0,
+          is_div: 1'b0
+        };
+      end
 
       if (x_branch_taken) begin
         // branch resolved in Execute; flush wrong-path insns in Fetch and Decode
         f_pc_current <= x_branch_target;
         f_cycle_status <= CYCLE_NO_STALL;
-
 
         decode_state <= '{
           pc: 32'd0,
@@ -715,7 +754,15 @@ end
           is_branch: 1'b0,
           is_ecall: 1'b0,
           is_load: 1'b0,
-          is_div: 1'b0
+          is_div: 1'b0,
+          div_signed: 1'b0,
+          div_rem: 1'b0,
+          div_in_dividend: 32'd0,
+          div_in_divisor: 32'd0,
+          div_div_by_zero: 1'b0,
+          div_overflow: 1'b0,
+          div_negate_quotient: 1'b0,
+          div_negate_remainder: 1'b0
         };
       end else if (d_load_stall) begin
         f_pc_current <= f_pc_current;
@@ -747,10 +794,18 @@ end
           is_branch: 1'b0,
           is_ecall: 1'b0,
           is_load: 1'b0,
-          is_div: 1'b0
-        };
+          is_div: 1'b0,
+          div_signed: 1'b0,
+          div_rem: 1'b0,
+          div_in_dividend: 32'd0,
+          div_in_divisor: 32'd0,
+          div_div_by_zero: 1'b0,
+          div_overflow: 1'b0,
+          div_negate_quotient: 1'b0,
+          div_negate_remainder: 1'b0
+          };
       end
-      else begin
+      else if (x_state.is_div || div_stage_busy[7] || div_stage_busy == 8'd0) begin
         f_pc_current <= f_pc_current + 32'd4;
         f_cycle_status <= CYCLE_NO_STALL;
 
@@ -763,7 +818,6 @@ end
         x_state <= '{
           pc: decode_state.pc,
           insn: decode_state.insn,
-          
           cycle_status: decode_state.cycle_status,
           rs1: d_rs1,
           rs2: d_rs2,
@@ -781,8 +835,23 @@ end
           is_branch: d_is_branch,
           is_ecall: d_is_ecall,
           is_load: d_is_load,
-          is_div: d_is_div
+          is_div: d_is_div,
+          div_signed: d_div_signed,
+          div_rem: d_div_is_rem,
+          div_in_dividend: d_div_in_dividend,
+          div_in_divisor: d_div_in_divisor,
+          div_div_by_zero: d_div_div_by_zero,
+          div_overflow: d_div_overflow,
+          div_negate_quotient: d_div_negate_quotient,
+          div_negate_remainder: d_div_negate_remainder
         };
+
+          div_stage_busy[0] <= d_is_div;
+      end
+      else begin
+        f_cycle_status <= CYCLE_DIV;
+        decode_state.cycle_status <= CYCLE_DIV;
+        x_state.cycle_status <= CYCLE_DIV;
       end
     end
   end
