@@ -37,14 +37,14 @@ typedef struct packed {
   logic is_ecall;
   logic is_load;
   logic is_div;
-  logic [`REG_SIZE] div_in_dividend;
-  logic [`REG_SIZE] div_in_divisor;
-  logic div_signed;
-  logic div_rem;
-  logic div_div_by_zero;
-  logic div_overflow;
-  logic div_negate_quotient;
-  logic div_negate_remainder;
+  //logic [`REG_SIZE] div_in_dividend;
+  //logic [`REG_SIZE] div_in_divisor;
+  //logic div_signed;
+  //logic div_rem;
+  //logic div_div_by_zero;
+  //logic div_overflow;
+  //logic div_negate_quotient;
+  //logic div_negate_remainder;
 } stage_execute_t;
 
 typedef struct packed {
@@ -64,5 +64,33 @@ typedef struct packed {
 } stage_memory_t;
 
 typedef stage_memory_t stage_writeback_t;
+
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+  logic [4:0] rs2;
+  logic [4:0] rd;
+  logic reg_write;
+  logic [`OPCODE_SIZE] opcode;
+  logic [2:0] funct3;
+  logic [6:0] funct7;
+  logic [`REG_SIZE] rs2_val;
+  logic [`REG_SIZE] rd_value;
+  logic is_ecall;
+  logic is_div;
+  logic [`REG_SIZE] dividend;
+  logic [`REG_SIZE] divisor;
+  logic [`REG_SIZE] quotient;
+  logic [`REG_SIZE] remainder;
+  logic [`REG_SIZE] dividend_input;
+  logic [`REG_SIZE] divisor_input;
+  logic is_signed;
+  logic is_rem;
+  logic div_by_zero;
+  logic overflow;
+  logic negate_quotient;
+  logic negate_remainder;
+} stage_divider_t;
 
 `endif // PIPELINE_STAGE_STRUCTS_SV
