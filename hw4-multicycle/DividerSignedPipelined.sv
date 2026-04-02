@@ -249,19 +249,18 @@ always_comb begin
         o_m_state.rs2_val      = divider_state[7].rs2_val;
         o_m_state.is_div       = divider_state[7].is_div;
 
-        o_m_state.rd_value = gen_divider_stages[7].out_quo;
-
         // if (divider_state[7].div_by_zero) begin
-        //     o_m_state.rd_value <= (divider_state[7].is_rem) ? divider_state[7].dividend_input : 32'hFFFF_FFFF;
-        // end else if (divider_state[7].overflow) begin
-        //     o_m_state.rd_value <= (divider_state[7].is_rem) ? 32'h0 : 32'h8000_0000;
-        // end else if (divider_state[7].is_signed) begin
-        //     o_m_state.rd_value <= (divider_state[7].is_rem)
-        //         ? (divider_state[7].negate_remainder ? twos_comp32(divider_state[7].remainder) : divider_state[7].remainder)
-        //         : (divider_state[7].negate_quotient  ? twos_comp32(divider_state[7].quotient)  : divider_state[7].quotient);
-        // end else begin
-        //     o_m_state.rd_value <= (divider_state[7].is_rem) ? divider_state[7].remainder : divider_state[7].quotient;
-        // end
+        //     o_m_state.rd_value = (divider_state[7].is_rem) ? divider_state[7].dividend_input : 32'hFFFF_FFFF;
+        // end else 
+        if (divider_state[7].overflow) begin
+            o_m_state.rd_value = (divider_state[7].is_rem) ? 32'h0 : 32'h8000_0000;
+        end else if (divider_state[7].is_signed) begin
+            o_m_state.rd_value = (divider_state[7].is_rem)
+                ? (divider_state[7].negate_remainder ? twos_comp32(gen_divider_stages[7].out_rem) : gen_divider_stages[7].out_rem)
+                : (divider_state[7].negate_quotient  ? twos_comp32(gen_divider_stages[7].out_quo)  : gen_divider_stages[7].out_quo);
+        end else begin
+            o_m_state.rd_value = (divider_state[7].is_rem) ? gen_divider_stages[7].out_rem : gen_divider_stages[7].out_quo;
+        end
     
 end
 

@@ -236,10 +236,12 @@ module DatapathPipelined (
  stage_memory_t div_out_m_state;
 
   // logic d_div_use, d_div_signed, d_div_is_rem, d_div_negate_quotient, d_div_negate_remainder;
-  // logic d_div_div_by_zero, d_div_overflow;
+  //logic d_div_div_by_zero, d_div_overflow;
   // logic d_div_a_neg, d_div_b_neg;
   // logic [`REG_SIZE] d_div_a_abs, d_div_b_abs;
   logic [7:0] div_stage_busy;
+
+  wire d_div_by_zero = d_is_div && (x_state.rs2_val == 32'b0);
 
   // always_comb begin
   //     d_div_in_dividend = 32'b0;
@@ -593,10 +595,11 @@ module DatapathPipelined (
   wire last_stage_div = div_stage_busy[7];
   wire div_ready = divider_active && last_stage_div && div_out_m_state.is_div;
   wire next_is_div = d_is_div;
+  wire div_by_zero = x_state.div_by_zero;
 
   wire div_stall = divider_active && !next_is_div;
   wire global_stall = div_stall || d_load_stall;
-  wire pass_to_x = x_state.is_div || div_stage_busy[7] || div_stage_busy == 8'd0;
+  wire pass_to_x = x_state.is_div || div_stage_busy == 8'd0;
 
   // Pipeline registers
   always_ff @(posedge clk) begin
@@ -626,12 +629,12 @@ module DatapathPipelined (
         is_branch: 1'b0,
         is_ecall: 1'b0,
         is_load: 1'b0,
-        is_div: 1'b0
+        is_div: 1'b0,
         // div_signed: 1'b0,
         // div_rem: 1'b0,
         // div_in_dividend: 32'd0,
         // div_in_divisor: 32'd0,
-        // div_div_by_zero: 1'b0,
+        div_by_zero: 1'b0
         // div_overflow: 1'b0,
         // div_negate_quotient: 1'b0,
         // div_negate_remainder: 1'b0
@@ -692,6 +695,23 @@ module DatapathPipelined (
 
       if (div_out_m_state.is_div) begin
         m_state <= div_out_m_state;
+      end
+      else if (div_by_zero) begin
+        m_state <= '{
+          pc: x_state.pc,
+          insn: x_state.insn,
+          cycle_status: CYCLE_NO_STALL,
+          rd: x_state.rd,
+          rs2: x_state.rs2,
+          rs2_val: x_src2,
+          opcode: x_state.opcode,
+          funct3: x_state.funct3,
+          funct7: x_state.funct7,
+          reg_write: x_state.reg_write,
+          rd_value: 32'hFFFF_FFFF, // per RISC-V spec, division by zero results in all 1s
+          is_ecall: x_state.is_ecall,
+          is_div: x_state.is_div
+        };
       end
       else if (!divider_active) begin
         m_state <= '{
@@ -758,12 +778,12 @@ module DatapathPipelined (
           is_branch: 1'b0,
           is_ecall: 1'b0,
           is_load: 1'b0,
-          is_div: 1'b0
+          is_div: 1'b0,
           // div_signed: 1'b0,
           // div_rem: 1'b0,
           // div_in_dividend: 32'd0,
           // div_in_divisor: 32'd0,
-          // div_div_by_zero: 1'b0,
+          div_by_zero: 1'b0
           // div_overflow: 1'b0,
           // div_negate_quotient: 1'b0,
           // div_negate_remainder: 1'b0
@@ -798,12 +818,12 @@ module DatapathPipelined (
           is_branch: 1'b0,
           is_ecall: 1'b0,
           is_load: 1'b0,
-          is_div: 1'b0
+          is_div: 1'b0,
           //div_signed: 1'b0,
           //div_rem: 1'b0,
           //div_in_dividend: 32'd0,
           //div_in_divisor: 32'd0,
-          // div_div_by_zero: 1'b0,
+          div_by_zero: 1'b0
           // div_overflow: 1'b0,
           // div_negate_quotient: 1'b0,
           // div_negate_remainder: 1'b0
@@ -839,12 +859,12 @@ module DatapathPipelined (
           is_branch: d_is_branch,
           is_ecall: d_is_ecall,
           is_load: d_is_load,
-          is_div: d_is_div
+          is_div: d_is_div,
           //div_signed: d_div_signed,
           //div_rem: d_div_is_rem,
           //div_in_dividend: d_div_in_dividend,
           //div_in_divisor: d_div_in_divisor,
-          //div_div_by_zero: d_div_div_by_zero,
+          div_by_zero: d_div_by_zero
           //div_overflow: d_div_overflow,
           //div_negate_quotient: d_div_negate_quotient,
           //div_negate_remainder: d_div_negate_remainder
