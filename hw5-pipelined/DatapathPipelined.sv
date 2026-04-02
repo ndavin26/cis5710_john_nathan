@@ -230,46 +230,8 @@ module DatapathPipelined (
   wire d_load_stall = x_state.is_load && x_state.rd != 5'd0 && ((x_state.rd == d_rs1) || (x_state.rd == d_rs2)) 
   && !(d_is_store && x_state.rd == d_rs2 && x_state.rd != d_rs1);
 
-  // Divider inputs/outputs and control signals
 
-  // logic [`REG_SIZE] d_div_in_dividend, d_div_in_divisor;
- stage_memory_t div_out_m_state;
-
-  // logic d_div_use, d_div_signed, d_div_is_rem, d_div_negate_quotient, d_div_negate_remainder;
-  //logic d_div_div_by_zero, d_div_overflow;
-  // logic d_div_a_neg, d_div_b_neg;
-  // logic [`REG_SIZE] d_div_a_abs, d_div_b_abs;
-
-
-  //wire d_div_by_zero = d_is_div && (rf_rs2_data == 32'b0);
-
-  // always_comb begin
-  //     d_div_in_dividend = 32'b0;
-  //     d_div_in_divisor = 32'b0;
-
-  //     d_div_signed = (x_state.opcode == OpcodeRegReg) && (x_state.funct7 == 7'b0000001) && (x_state.funct3[0] == 1'b0);
-  //     d_div_is_rem = (x_state.opcode == OpcodeRegReg) && (x_state.funct7 == 7'b0000001) && ((x_state.funct3 == 3'b110) || (x_state.funct3 == 3'b111));
-
-  //     d_div_div_by_zero = d_div_use && (x_state.rs2_val == 32'b0);
-  //     d_div_overflow = d_div_signed && (x_state.rs1_val == 32'h8000_0000) && (x_state.rs2_val == 32'hFFFF_FFFF);
-
-  //     d_div_a_neg = x_state.rs1_val[31];
-  //     d_div_b_neg = x_state.rs2_val[31];
-
-  //     d_div_a_abs = d_div_a_neg ? twos_comp32(x_state.rs1_val) : x_state.rs1_val;
-  //     d_div_b_abs = d_div_b_neg ? twos_comp32(x_state.rs2_val) : x_state.rs2_val;
-
-  //     if (!d_div_signed) begin
-  //       d_div_in_dividend = x_state.rs1_val;
-  //       d_div_in_divisor = x_state.rs2_val;
-  //     end else begin
-  //       d_div_in_dividend = d_div_a_abs;
-  //       d_div_in_divisor = d_div_b_abs;
-  //     end 
-
-  //     d_div_negate_quotient = d_div_signed && (d_div_a_neg ^ d_div_b_neg);
-  //     d_div_negate_remainder = d_div_signed && d_div_a_neg;
-  // end
+  stage_memory_t div_out_m_state;
 
   /*****************/
   /* EXECUTE STAGE */
@@ -592,23 +554,15 @@ module DatapathPipelined (
 
   end
 
-  //div_stage_busy[0] = d_is_div && !d_div_by_zero; // start a new division if this is a div instruction and it's not a divide-by-zero case
-
-  //wire divide = d_is_div && !d_div_by_zero;
-
   wire divide = x_state.is_div;
   logic [7:0] div_stage_busy; // bit i indicates whether stage i of the divider is busy with an ongoing division operation. bit 0 corresponds to the stage that takes inputs directly from Decode, and bit 7 corresponds to the stage that outputs results directly to Memory.
 
   wire divider_active = (div_stage_busy != 0) || divide; // whether there is an active division operation in any stage of the divider, including a new one starting this cycle
   wire last_stage_div = div_stage_busy[7];
   wire next_is_div = d_is_div;
-  //wire div_by_zero = x_state.div_by_zero;
-
-  //wire div_by_zero = x_state.is_div && (x_src2 == 32'b0);
 
   wire div_stall = divider_active && !x_state.is_div;
   wire global_stall = div_stall || d_load_stall;
-  //wire pass_to_x = x_state.is_div || div_stage_busy == 8'd0;
 
   // Pipeline registers
   always_ff @(posedge clk) begin
@@ -639,14 +593,7 @@ module DatapathPipelined (
         is_ecall: 1'b0,
         is_load: 1'b0,
         is_div: 1'b0
-        // div_signed: 1'b0,
-        // div_rem: 1'b0,
-        // div_in_dividend: 32'd0,
-        // div_in_divisor: 32'd0,
-        //div_by_zero: 1'b0
-        // div_overflow: 1'b0,
-        // div_negate_quotient: 1'b0,
-        // div_negate_remainder: 1'b0
+
       };
       m_state <= '{
         pc: 32'd0,
@@ -704,24 +651,7 @@ module DatapathPipelined (
 
       if (div_out_m_state.is_div) begin
         m_state <= div_out_m_state;
-      end/*
-      else if (x_state.div_by_zero) begin
-        m_state <= '{
-          pc: x_state.pc,
-          insn: x_state.insn,
-          cycle_status: CYCLE_NO_STALL,
-          rd: x_state.rd,
-          rs2: x_state.rs2,
-          rs2_val: x_src2,
-          opcode: x_state.opcode,
-          funct3: x_state.funct3,
-          funct7: x_state.funct7,
-          reg_write: x_state.reg_write,
-          rd_value: 32'hFFFF_FFFF, // per RISC-V spec, division by zero results in all 1s
-          is_ecall: x_state.is_ecall,
-          is_div: x_state.is_div
-        };
-      end*/
+      end
       else if (!divider_active) begin
         m_state <= '{
           pc: x_state.pc,
@@ -788,14 +718,6 @@ module DatapathPipelined (
           is_ecall: 1'b0,
           is_load: 1'b0,
           is_div: 1'b0
-          // div_signed: 1'b0,
-          // div_rem: 1'b0,
-          // div_in_dividend: 32'd0,
-          // div_in_divisor: 32'd0,
-          //div_by_zero: 1'b0
-          // div_overflow: 1'b0,
-          // div_negate_quotient: 1'b0,
-          // div_negate_remainder: 1'b0
         };
       end else if (d_load_stall) begin
         f_pc_current <= f_pc_current;
@@ -828,14 +750,6 @@ module DatapathPipelined (
           is_ecall: 1'b0,
           is_load: 1'b0,
           is_div: 1'b0
-          //div_signed: 1'b0,
-          //div_rem: 1'b0,
-          //div_in_dividend: 32'd0,
-          //div_in_divisor: 32'd0,
-          //div_by_zero: 1'b0
-          // div_overflow: 1'b0,
-          // div_negate_quotient: 1'b0,
-          // div_negate_remainder: 1'b0
           };
       end
       else if (div_stall)begin
@@ -870,7 +784,6 @@ module DatapathPipelined (
           is_ecall: x_state.is_ecall,
           is_load: x_state.is_load,
           is_div: x_state.is_div
-          // div_by_zero: x_state.div_by_zero
         };
       end
       else begin
@@ -890,8 +803,6 @@ module DatapathPipelined (
           rs1: d_rs1,
           rs2: d_rs2,
           rd: d_rd,
-          //rs1_val: x_src1,
-          //rs2_val: x_src2,
           rs1_val: rf_rs1_data,
           rs2_val: rf_rs2_data,
           imm_i_sext: d_imm_i_sext,
@@ -906,65 +817,13 @@ module DatapathPipelined (
           is_ecall: d_is_ecall,
           is_load: d_is_load,
           is_div: d_is_div
-          //div_by_zero: div_by_zero
-          //div_signed: d_div_signed,
-          //div_rem: d_div_is_rem,
-          //div_in_dividend: d_div_in_dividend,
-          //div_in_divisor: d_div_in_divisor,
-
-          //div_overflow: d_div_overflow,
-          //div_negate_quotient: d_div_negate_quotient,
-          //div_negate_remainder: d_div_negate_remainder
         };
       end
       
     end
   end
-
-
-
 endmodule
-/*
-      else begin    
-        f_pc_current <= f_pc_current;
-        f_cycle_status <= CYCLE_DIV;
 
-        decode_state <= '{
-          pc: decode_state.pc,
-          insn: decode_state.insn,
-          cycle_status: CYCLE_DIV
-        };
-        x_state <= '{
-          pc: x_state.pc,
-          insn: x_state.insn,
-           cycle_status: CYCLE_DIV,
-          rs1: x_state.rs1,
-          rs2: x_state.rs2,
-          rd: x_state.rd,
-          rs1_val: x_src1,
-          rs2_val: x_src2,
-          imm_i_sext: x_state.imm_i_sext,
-          imm_b_sext: x_state.imm_b_sext,
-          imm_s_sext: x_state.imm_s_sext,
-          imm_u: x_state.imm_u,
-          funct3: x_state.funct3,
-          funct7: x_state.funct7,
-          opcode: x_state.opcode,
-          reg_write: x_state.reg_write,
-          is_branch: x_state.is_branch,
-          is_ecall: x_state.is_ecall,
-          is_load: x_state.is_load,
-          is_div: x_state.is_div,
-          // div_signed: x_state.div_signed,
-          // div_rem: x_state.div_rem,
-          // div_in_dividend: x_state.div_in_dividend,
-          // div_in_divisor: x_state.div_in_divisor,
-          div_by_zero: x_state.div_by_zero
-          // div_overflow: x_state.div_overflow,
-          // div_negate_quotient: x_state.div_negate_quotient,
-          // div_negate_remainder: x_state.div_negate_remainder
-        };
-      end*/
 module MemorySingleCycle #(
     parameter int NUM_WORDS = 512
 ) (
@@ -1090,6 +949,4 @@ module Processor (
       .trace_completed_insn(trace_completed_insn),
       .trace_completed_cycle_status(trace_completed_cycle_status)
   );
-
-
 endmodule
