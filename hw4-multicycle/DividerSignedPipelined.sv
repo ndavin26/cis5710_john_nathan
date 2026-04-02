@@ -14,6 +14,7 @@
 module DividerSignedPipelined (
     input wire clk, rst, stall,
     input stage_execute_t i_x_state,
+    input logic [`REG_SIZE] i_src1, i_src2,
     output stage_memory_t o_m_state
 );
 
@@ -48,18 +49,25 @@ module DividerSignedPipelined (
         divider_state[0].is_signed = (i_x_state.funct7 == 7'b0000001) && (i_x_state.funct3[0] == 1'b0);
         divider_state[0].is_rem = (i_x_state.funct7 == 7'b0000001) && ((i_x_state.funct3 == 3'b110) || (i_x_state.funct3 == 3'b111));
 
-        divider_state[0].div_by_zero = i_x_state.rs2_val == 32'b0;
-        divider_state[0].overflow = divider_state[0].is_signed && (i_x_state.rs1_val == 32'h8000_0000) && (i_x_state.rs2_val == 32'hFFFF_FFFF);
+        //divider_state[0].div_by_zero = i_x_state.rs2_val == 32'b0;
+        //divider_state[0].overflow = divider_state[0].is_signed && (i_x_state.rs1_val == 32'h8000_0000) && (i_x_state.rs2_val == 32'hFFFF_FFFF);
+        divider_state[0].overflow = divider_state[0].is_signed && (i_src1 == 32'h8000_0000) && (i_src2 == 32'hFFFF_FFFF);
 
-        div_a_neg = i_x_state.rs1_val[31];
-        div_b_neg = i_x_state.rs2_val[31];
+        // div_a_neg = i_x_state.rs1_val[31];
+        // div_b_neg = i_x_state.rs2_val[31];
+        div_a_neg = i_src1[31];
+        div_b_neg = i_src2[31];
 
-        div_a_abs = div_a_neg ? twos_comp32(i_x_state.rs1_val) : i_x_state.rs1_val;
-        div_b_abs = div_b_neg ? twos_comp32(i_x_state.rs2_val) : i_x_state.rs2_val;
+        // div_a_abs = div_a_neg ? twos_comp32(i_x_state.rs1_val) : i_x_state.rs1_val;
+        // div_b_abs = div_b_neg ? twos_comp32(i_x_state.rs2_val) : i_x_state.rs2_val;
+        div_a_abs = div_a_neg ? twos_comp32(i_src1) : i_src1;
+        div_b_abs = div_b_neg ? twos_comp32(i_src2) : i_src2;
 
         if (!divider_state[0].is_signed) begin
-            dividend_input = i_x_state.rs1_val;
-            divisor_input = i_x_state.rs2_val;
+            // dividend_input = i_x_state.rs1_val;
+            // divisor_input = i_x_state.rs2_val;
+            dividend_input = i_src1;
+            divisor_input = i_src2;
         end else begin
             dividend_input = div_a_abs;
             divisor_input = div_b_abs;
@@ -137,7 +145,7 @@ module DividerSignedPipelined (
                     divider_state[i].negate_quotient <= 1'b0;
                     divider_state[i].negate_remainder <= 1'b0;
                     divider_state[i].is_rem <= 1'b0;
-                    divider_state[i].div_by_zero <= 1'b0;
+                    //divider_state[i].div_by_zero <= 1'b0;
                     divider_state[i].overflow <= 1'b0;
                     divider_state[i].dividend_input <= 32'h0;
                     divider_state[i].divisor_input <= 32'h0;
@@ -160,7 +168,7 @@ module DividerSignedPipelined (
                         divider_state[i].negate_quotient <= divider_state[i-1].negate_quotient;
                         divider_state[i].negate_remainder <= divider_state[i-1].negate_remainder;
                         divider_state[i].is_rem <= divider_state[i-1].is_rem;
-                        divider_state[i].div_by_zero <= divider_state[i-1].div_by_zero;
+                        //divider_state[i].div_by_zero <= divider_state[i-1].div_by_zero;
                         divider_state[i].overflow <= divider_state[i-1].overflow;
                         divider_state[i].dividend_input <= divider_state[i-1].dividend_input;
                         divider_state[i].divisor_input <= divider_state[i-1].divisor_input;
@@ -249,10 +257,20 @@ always_comb begin
         o_m_state.rs2_val      = divider_state[7].rs2_val;
         o_m_state.is_div       = divider_state[7].is_div;
 
+        if (divider_state[7].overflow) begin
+            o_m_state.rd_value = (divider_state[7].is_rem) ? 32'h0 : 32'h8000_0000;
+        end else if (divider_state[7].is_signed) begin
+            o_m_state.rd_value = (divider_state[7].is_rem)
+                ? (divider_state[7].negate_remainder ? twos_comp32(divider_state[7].remainder) : divider_state[7].remainder)
+                : (divider_state[7].negate_quotient  ? twos_comp32(divider_state[7].quotient)  : divider_state[7].quotient);
+        end else begin
+            o_m_state.rd_value = (divider_state[7].is_rem) ? divider_state[7].remainder : divider_state[7].quotient;
+        end
+
         // if (divider_state[7].div_by_zero) begin
         //     o_m_state.rd_value = (divider_state[7].is_rem) ? divider_state[7].dividend_input : 32'hFFFF_FFFF;
         // end else 
-        if (divider_state[7].overflow) begin
+        /*if (divider_state[7].overflow) begin
             o_m_state.rd_value = (divider_state[7].is_rem) ? 32'h0 : 32'h8000_0000;
         end else if (divider_state[7].is_signed) begin
             o_m_state.rd_value = (divider_state[7].is_rem)
@@ -261,6 +279,7 @@ always_comb begin
         end else begin
             o_m_state.rd_value = (divider_state[7].is_rem) ? gen_divider_stages[7].out_rem : gen_divider_stages[7].out_quo;
         end
+        */
     
 end
 

@@ -239,9 +239,9 @@ module DatapathPipelined (
   //logic d_div_div_by_zero, d_div_overflow;
   // logic d_div_a_neg, d_div_b_neg;
   // logic [`REG_SIZE] d_div_a_abs, d_div_b_abs;
-  logic [7:0] div_stage_busy;
 
-  wire d_div_by_zero = d_is_div && (x_state.rs2_val == 32'b0);
+
+  //wire d_div_by_zero = d_is_div && (rf_rs2_data == 32'b0);
 
   // always_comb begin
   //     d_div_in_dividend = 32'b0;
@@ -294,6 +294,8 @@ module DatapathPipelined (
   DividerSignedPipelined u_div(
     .clk(clk), .rst(rst), .stall(d_load_stall),
     .i_x_state(x_state),
+    .i_src1(x_src1),
+    .i_src2(x_src2),
     .o_m_state(div_out_m_state)
   );
 
@@ -566,7 +568,6 @@ module DatapathPipelined (
   always_comb begin
     x_src1 = x_state.rs1_val;
     if ((x_state.rs1 != 5'd0) && m_state.reg_write && (m_state.rd == x_state.rs1)) begin
-
       x_src1 = m_state.rd_value;
     end else if ((x_state.rs1 != 5'd0) && w_state.reg_write && (w_state.rd == x_state.rs1)) begin
       x_src1 = w_state.rd_value;
@@ -591,15 +592,23 @@ module DatapathPipelined (
 
   end
 
-  wire divider_active = (div_stage_busy != 0);
-  wire last_stage_div = div_stage_busy[7];
-  wire div_ready = divider_active && last_stage_div && div_out_m_state.is_div;
-  wire next_is_div = d_is_div;
-  wire div_by_zero = x_state.div_by_zero;
+  //div_stage_busy[0] = d_is_div && !d_div_by_zero; // start a new division if this is a div instruction and it's not a divide-by-zero case
 
-  wire div_stall = divider_active && !next_is_div;
+  //wire divide = d_is_div && !d_div_by_zero;
+
+  wire divide = x_state.is_div;
+  logic [7:0] div_stage_busy; // bit i indicates whether stage i of the divider is busy with an ongoing division operation. bit 0 corresponds to the stage that takes inputs directly from Decode, and bit 7 corresponds to the stage that outputs results directly to Memory.
+
+  wire divider_active = (div_stage_busy != 0) || divide; // whether there is an active division operation in any stage of the divider, including a new one starting this cycle
+  wire last_stage_div = div_stage_busy[7];
+  wire next_is_div = d_is_div;
+  //wire div_by_zero = x_state.div_by_zero;
+
+  //wire div_by_zero = x_state.is_div && (x_src2 == 32'b0);
+
+  wire div_stall = divider_active && !x_state.is_div;
   wire global_stall = div_stall || d_load_stall;
-  wire pass_to_x = x_state.is_div || div_stage_busy == 8'd0;
+  //wire pass_to_x = x_state.is_div || div_stage_busy == 8'd0;
 
   // Pipeline registers
   always_ff @(posedge clk) begin
@@ -629,12 +638,12 @@ module DatapathPipelined (
         is_branch: 1'b0,
         is_ecall: 1'b0,
         is_load: 1'b0,
-        is_div: 1'b0,
+        is_div: 1'b0
         // div_signed: 1'b0,
         // div_rem: 1'b0,
         // div_in_dividend: 32'd0,
         // div_in_divisor: 32'd0,
-        div_by_zero: 1'b0
+        //div_by_zero: 1'b0
         // div_overflow: 1'b0,
         // div_negate_quotient: 1'b0,
         // div_negate_remainder: 1'b0
@@ -691,12 +700,12 @@ module DatapathPipelined (
         is_div: m_state.is_div
       };
 
-      div_stage_busy <= div_stage_busy << 1;
+      div_stage_busy <= {div_stage_busy[6:0], divide};
 
       if (div_out_m_state.is_div) begin
         m_state <= div_out_m_state;
-      end
-      else if (div_by_zero) begin
+      end/*
+      else if (x_state.div_by_zero) begin
         m_state <= '{
           pc: x_state.pc,
           insn: x_state.insn,
@@ -712,7 +721,7 @@ module DatapathPipelined (
           is_ecall: x_state.is_ecall,
           is_div: x_state.is_div
         };
-      end
+      end*/
       else if (!divider_active) begin
         m_state <= '{
           pc: x_state.pc,
@@ -720,7 +729,7 @@ module DatapathPipelined (
           cycle_status: x_state.cycle_status,
           rd: x_state.rd,
           rs2: x_state.rs2,
-          rs2_val: x_src2,
+          rs2_val: x_src2,  
           opcode: x_state.opcode,
           funct3: x_state.funct3,
           funct7: x_state.funct7,
@@ -778,12 +787,12 @@ module DatapathPipelined (
           is_branch: 1'b0,
           is_ecall: 1'b0,
           is_load: 1'b0,
-          is_div: 1'b0,
+          is_div: 1'b0
           // div_signed: 1'b0,
           // div_rem: 1'b0,
           // div_in_dividend: 32'd0,
           // div_in_divisor: 32'd0,
-          div_by_zero: 1'b0
+          //div_by_zero: 1'b0
           // div_overflow: 1'b0,
           // div_negate_quotient: 1'b0,
           // div_negate_remainder: 1'b0
@@ -818,18 +827,53 @@ module DatapathPipelined (
           is_branch: 1'b0,
           is_ecall: 1'b0,
           is_load: 1'b0,
-          is_div: 1'b0,
+          is_div: 1'b0
           //div_signed: 1'b0,
           //div_rem: 1'b0,
           //div_in_dividend: 32'd0,
           //div_in_divisor: 32'd0,
-          div_by_zero: 1'b0
+          //div_by_zero: 1'b0
           // div_overflow: 1'b0,
           // div_negate_quotient: 1'b0,
           // div_negate_remainder: 1'b0
           };
       end
-      else if (pass_to_x) begin
+      else if (div_stall)begin
+        f_pc_current <= f_pc_current;
+        f_cycle_status <= CYCLE_DIV;
+
+        decode_state <= '{
+          pc: decode_state.pc,
+          insn: decode_state.insn,
+          cycle_status: CYCLE_DIV
+        };
+        x_state <= '{
+          pc: x_state.pc,
+          insn: x_state.insn,
+          cycle_status: CYCLE_DIV,
+          rs1: x_state.rs1,
+          rs2: x_state.rs2,
+          rd: x_state.rd,
+          // rs1_val: x_src1,
+          // rs2_val: x_src2,
+          rs1_val: x_state.rs1_val,
+          rs2_val: x_state.rs2_val,
+          imm_i_sext: x_state.imm_i_sext,
+          imm_b_sext: x_state.imm_b_sext,
+          imm_s_sext: x_state.imm_s_sext,
+          imm_u: x_state.imm_u,
+          funct3: x_state.funct3,
+          funct7: x_state.funct7,
+          opcode: x_state.opcode,
+          reg_write: x_state.reg_write,
+          is_branch: x_state.is_branch,
+          is_ecall: x_state.is_ecall,
+          is_load: x_state.is_load,
+          is_div: x_state.is_div
+          // div_by_zero: x_state.div_by_zero
+        };
+      end
+      else begin
         f_pc_current <= f_pc_current + 32'd4;
         f_cycle_status <= CYCLE_NO_STALL;
 
@@ -846,8 +890,10 @@ module DatapathPipelined (
           rs1: d_rs1,
           rs2: d_rs2,
           rd: d_rd,
-          rs1_val: x_src1,
-          rs2_val: x_src2,
+          //rs1_val: x_src1,
+          //rs2_val: x_src2,
+          rs1_val: rf_rs1_data,
+          rs2_val: rf_rs2_data,
           imm_i_sext: d_imm_i_sext,
           imm_b_sext: d_imm_b_sext,
           imm_s_sext: d_imm_s_sext,
@@ -859,29 +905,66 @@ module DatapathPipelined (
           is_branch: d_is_branch,
           is_ecall: d_is_ecall,
           is_load: d_is_load,
-          is_div: d_is_div,
+          is_div: d_is_div
+          //div_by_zero: div_by_zero
           //div_signed: d_div_signed,
           //div_rem: d_div_is_rem,
           //div_in_dividend: d_div_in_dividend,
           //div_in_divisor: d_div_in_divisor,
-          div_by_zero: d_div_by_zero
+
           //div_overflow: d_div_overflow,
           //div_negate_quotient: d_div_negate_quotient,
           //div_negate_remainder: d_div_negate_remainder
         };
-
-          div_stage_busy[0] <= d_is_div;
       end
-      else begin
-        f_cycle_status <= CYCLE_DIV;
-        decode_state.cycle_status <= CYCLE_DIV;
-        x_state.cycle_status <= CYCLE_DIV;
-      end
+      
     end
   end
 
-endmodule
 
+
+endmodule
+/*
+      else begin    
+        f_pc_current <= f_pc_current;
+        f_cycle_status <= CYCLE_DIV;
+
+        decode_state <= '{
+          pc: decode_state.pc,
+          insn: decode_state.insn,
+          cycle_status: CYCLE_DIV
+        };
+        x_state <= '{
+          pc: x_state.pc,
+          insn: x_state.insn,
+           cycle_status: CYCLE_DIV,
+          rs1: x_state.rs1,
+          rs2: x_state.rs2,
+          rd: x_state.rd,
+          rs1_val: x_src1,
+          rs2_val: x_src2,
+          imm_i_sext: x_state.imm_i_sext,
+          imm_b_sext: x_state.imm_b_sext,
+          imm_s_sext: x_state.imm_s_sext,
+          imm_u: x_state.imm_u,
+          funct3: x_state.funct3,
+          funct7: x_state.funct7,
+          opcode: x_state.opcode,
+          reg_write: x_state.reg_write,
+          is_branch: x_state.is_branch,
+          is_ecall: x_state.is_ecall,
+          is_load: x_state.is_load,
+          is_div: x_state.is_div,
+          // div_signed: x_state.div_signed,
+          // div_rem: x_state.div_rem,
+          // div_in_dividend: x_state.div_in_dividend,
+          // div_in_divisor: x_state.div_in_divisor,
+          div_by_zero: x_state.div_by_zero
+          // div_overflow: x_state.div_overflow,
+          // div_negate_quotient: x_state.div_negate_quotient,
+          // div_negate_remainder: x_state.div_negate_remainder
+        };
+      end*/
 module MemorySingleCycle #(
     parameter int NUM_WORDS = 512
 ) (

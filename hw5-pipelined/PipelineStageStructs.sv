@@ -41,7 +41,7 @@ typedef struct packed {
   //logic [`REG_SIZE] div_in_divisor;
   //logic div_signed;
   //logic div_rem;
-  logic div_by_zero;
+  //logic div_by_zero;
   //logic div_overflow;
   //logic div_negate_quotient;
   //logic div_negate_remainder;
@@ -87,7 +87,7 @@ typedef struct packed {
   logic [`REG_SIZE] divisor_input;
   logic is_signed;
   logic is_rem;
-  logic div_by_zero;
+  //logic div_by_zero;
   logic overflow;
   logic negate_quotient;
   logic negate_remainder;
