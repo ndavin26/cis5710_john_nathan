@@ -33,6 +33,7 @@ module DividerSignedPipelined (
         divider_state[0].pc = i_x_state.pc;
         divider_state[0].insn = i_x_state.insn;
         divider_state[0].cycle_status = i_x_state.cycle_status;
+        //divider_state[0].cycle_status = CYCLE_NO_STALL;
         divider_state[0].rs2 = i_x_state.rs2;
         divider_state[0].rd = i_x_state.rd;
         divider_state[0].reg_write = i_x_state.reg_write;
@@ -138,7 +139,8 @@ module DividerSignedPipelined (
                 else if (!stall)begin
                     divider_state[i].pc <= divider_state[i-1].pc;
                     divider_state[i].insn <= divider_state[i-1].insn;
-                    divider_state[i].cycle_status <= divider_state[i-1].cycle_status;
+                    //divider_state[i].cycle_status <= divider_state[i-1].cycle_status;
+                    divider_state[i].cycle_status <= CYCLE_NO_STALL;
                     divider_state[i].rs2 <= divider_state[i-1].rs2;
                     divider_state[i].rd <= divider_state[i-1].rd;
                     divider_state[i].reg_write <= divider_state[i-1].reg_write;

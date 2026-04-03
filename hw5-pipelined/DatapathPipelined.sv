@@ -584,7 +584,7 @@ module DatapathPipelined (
   always_ff @(posedge clk) begin
     if (rst) begin
       f_pc_current <= 32'd0;
-      f_cycle_status <= CYCLE_NO_STALL;
+      f_cycle_status <= CYCLE_RESET;
 
       decode_state <= '{pc: 32'd0, insn: 32'd0, cycle_status: CYCLE_RESET};
 
@@ -650,7 +650,8 @@ module DatapathPipelined (
       w_state <= '{
         pc: m_state.pc,
         insn: m_state.insn,
-        cycle_status: m_state.cycle_status,
+        //cycle_status: m_state.cycle_status,
+        cycle_status: CYCLE_NO_STALL,
         rd: m_state.rd,
         rs2: m_state.rs2,
         rs2_val: m_state.rs2_val,
@@ -672,7 +673,8 @@ module DatapathPipelined (
         m_state <= '{
           pc: x_state.pc,
           insn: x_state.insn,
-          cycle_status: x_state.cycle_status,
+          //cycle_status: x_state.cycle_status,
+          cycle_status: CYCLE_NO_STALL,
           rd: x_state.rd,
           rs2: x_state.rs2,
           rs2_val: x_src2,  
@@ -688,7 +690,8 @@ module DatapathPipelined (
         m_state <= '{
           pc: 32'd0,
           insn: 32'd0,
-          cycle_status: CYCLE_RESET,
+          //cycle_status: CYCLE_RESET,
+          cycle_status: CYCLE_DIV,
           rd: 5'd0,
           rs2: 5'd0,
           rs2_val: 32'd0,
@@ -748,7 +751,7 @@ module DatapathPipelined (
         x_state <= '{
           pc: 32'd0,
           insn: 32'd0,
-          cycle_status: CYCLE_NO_STALL,
+          cycle_status: CYCLE_LOAD2USE,
           rs1: 5'd0,
           rs2: 5'd0,
           rd: 5'd0,
@@ -809,13 +812,13 @@ module DatapathPipelined (
         decode_state <= '{
           pc: f_pc_current,
           insn: f_insn,
-          cycle_status: f_cycle_status
+          cycle_status: CYCLE_NO_STALL
         };
 
         x_state <= '{
           pc: decode_state.pc,
           insn: decode_state.insn,
-          cycle_status: decode_state.cycle_status,
+          cycle_status: CYCLE_NO_STALL,
           rs1: d_rs1,
           rs2: d_rs2,
           rd: d_rd,
