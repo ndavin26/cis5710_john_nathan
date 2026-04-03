@@ -14,6 +14,10 @@
  * be present in a single cycle. All relevant stall conditions should be ORed
  * together.
  */
+
+`ifndef CYCLE_STATUS_SV
+`define CYCLE_STATUS_SV
+
 typedef enum {
   /** invalid value, this should never appear after the initial reset sequence completes */
   CYCLE_INVALID = 0,
@@ -41,11 +45,17 @@ typedef enum {
   /** NOT CURRENTLY USED: a stall cycle that arose from a fence.i insn */
   CYCLE_FENCEI = 64,
 
-  // the values below are only needed in HW6B
+  // the values below are only needed in HW6
 
-  /** a stall cycle that arose from an insn cache miss */
-  CYCLE_ICACHE_MISS = 128,
-  /** a stall cycle that arose from a data cache miss */
-  CYCLE_DCACHE_MISS = 256
+  /** a stall cycle that arose from waiting on insn memory */
+  CYCLE_IMEM_WAIT = 128,
+  /** NOT CURRENTLY USED: a stall cycle that arose from waiting on data memory */
+  CYCLE_DMEM_WAIT = 256,
+  /** NOT CURRENTLY USED: a stall cycle that arose from an insn cache miss */
+  CYCLE_ICACHE_MISS = 512,
+  /** NOT CURRENTLY USED: a stall cycle that arose from a data cache miss */
+  CYCLE_DCACHE_MISS = 1024
 
 } cycle_status_e;
+
+`endif // CYCLE_STATUS_SV
