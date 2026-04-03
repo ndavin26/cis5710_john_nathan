@@ -561,8 +561,24 @@ module DatapathPipelined (
   wire last_stage_div = div_stage_busy[7];
   wire next_is_div = d_is_div;
 
-  wire div_stall = divider_active && !x_state.is_div;
+  wire div_stall = (divider_active && !x_state.is_div) || (dependent_on_active_div && x_state.is_div);
   wire global_stall = div_stall || d_load_stall;
+
+  logic [4:0] active_div_rd [7:0];
+  logic dependent_on_active_div;
+
+  wire mem_stall = (dependent_on_active_div && x_state.is_div) || divider_active;
+
+  always_comb begin
+    dependent_on_active_div = 1'b0;
+    for (int i = 1; i < 8; i++) begin
+        if (((u_div.divider_state[i].rd == x_state.rs1) || 
+             (u_div.divider_state[i].rd == x_state.rs2)) && 
+            u_div.divider_state[i].is_div)
+            dependent_on_active_div = 1'b1;
+    end
+  end
+  
 
   // Pipeline registers
   always_ff @(posedge clk) begin
@@ -652,7 +668,7 @@ module DatapathPipelined (
       if (div_out_m_state.is_div) begin
         m_state <= div_out_m_state;
       end
-      else if (!divider_active) begin
+      else if (!mem_stall) begin
         m_state <= '{
           pc: x_state.pc,
           insn: x_state.insn,
