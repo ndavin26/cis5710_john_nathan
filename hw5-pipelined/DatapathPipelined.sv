@@ -567,7 +567,7 @@ module DatapathPipelined (
   logic [4:0] active_div_rd [7:0];
   logic dependent_on_active_div;
 
-  wire mem_stall = (dependent_on_active_div && x_state.is_div) || divider_active;
+  wire mem_stall = (dependent_on_active_div && x_state.is_div) || (divider_active && !div_stage_busy[7]);
 
   always_comb begin
     dependent_on_active_div = 1'b0;
