@@ -240,7 +240,7 @@ module DatapathPipelined (
   //Nathan added jal/ jalr
   wire d_reg_write = d_is_lui || d_is_auipc || d_is_regimm || d_is_regreg || d_is_load || d_is_div || d_is_jal || d_is_jalr;
 
-  wire d_load_stall = x_state.is_load && x_state.rd != 5'd0 && ((x_state.rd == d_rs1) || (x_state.rd == d_rs2)) 
+  wire d_load_stall = x_state.is_load && x_state.rd != 5'd0 && ((x_state.rd == d_rs1) || ((x_state.rd == d_rs2) && (d_is_regreg || d_is_branch))) 
   && !(d_is_store && x_state.rd == d_rs2 && x_state.rd != d_rs1);
 
 
@@ -767,12 +767,12 @@ module DatapathPipelined (
         };
       end else if (d_load_stall) begin
         f_pc_current <= f_pc_current;
-        f_cycle_status <= CYCLE_LOAD2USE;
+        f_cycle_status <= CYCLE_NO_STALL;
 
         decode_state <= '{
           pc: decode_state.pc,
           insn: decode_state.insn,
-          cycle_status: CYCLE_LOAD2USE
+          cycle_status: CYCLE_NO_STALL
         };
 
         x_state <= '{
@@ -800,17 +800,17 @@ module DatapathPipelined (
       end
       else if (div_stall)begin
         f_pc_current <= f_pc_current;
-        f_cycle_status <= CYCLE_DIV;
+        f_cycle_status <= CYCLE_NO_STALL;
 
         decode_state <= '{
           pc: decode_state.pc,
           insn: decode_state.insn,
-          cycle_status: CYCLE_DIV
+          cycle_status: CYCLE_NO_STALL
         };
         x_state <= '{
           pc: x_state.pc,
           insn: x_state.insn,
-          cycle_status: CYCLE_DIV,
+          cycle_status: CYCLE_NO_STALL,
           rs1: x_state.rs1,
           rs2: x_state.rs2,
           rd: x_state.rd,
@@ -845,7 +845,7 @@ module DatapathPipelined (
         x_state <= '{
           pc: decode_state.pc,
           insn: decode_state.insn,
-          cycle_status: CYCLE_NO_STALL,
+          cycle_status: decode_state.cycle_status,
           rs1: d_rs1,
           rs2: d_rs2,
           rd: d_rd,
