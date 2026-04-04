@@ -581,10 +581,11 @@ module DatapathPipelined (
   end
 
   wire divide = x_state.is_div;
-  logic [7:0] div_stage_busy; // bit i indicates whether stage i of the divider is busy with an ongoing division operation. bit 0 corresponds to the stage that takes inputs directly from Decode, and bit 7 corresponds to the stage that outputs results directly to Memory.
+  //logic [7:0] div_stage_busy; // bit i indicates whether stage i of the divider is busy with an ongoing division operation. bit 0 corresponds to the stage that takes inputs directly from Decode, and bit 7 corresponds to the stage that outputs results directly to Memory.
+  logic [6:0] div_stage_busy;
 
   wire divider_active = (div_stage_busy != 0) || divide; // whether there is an active division operation in any stage of the divider, including a new one starting this cycle
-  wire last_stage_div = div_stage_busy[7];
+  //wire last_stage_div = div_stage_busy[7];
   wire next_is_div = d_is_div;
 
   wire div_stall = (divider_active && !x_state.is_div) || (dependent_on_active_div && x_state.is_div);
@@ -593,7 +594,7 @@ module DatapathPipelined (
   logic [4:0] active_div_rd [7:0];
   logic dependent_on_active_div;
 
-  wire mem_stall = (dependent_on_active_div && x_state.is_div) || (divider_active && !div_stage_busy[7]);
+  wire mem_stall = (dependent_on_active_div && x_state.is_div) || (divider_active && !div_stage_busy[6]);
 
   always_comb begin
     dependent_on_active_div = 1'b0;
@@ -668,7 +669,7 @@ module DatapathPipelined (
         is_div: 1'b0
       };
 
-      div_stage_busy <= 8'b0;
+      div_stage_busy <= 7'b0;
 
     end else begin
       
@@ -676,8 +677,8 @@ module DatapathPipelined (
       w_state <= '{
         pc: m_state.pc,
         insn: m_state.insn,
-        //cycle_status: m_state.cycle_status,
-        cycle_status: CYCLE_NO_STALL,
+        cycle_status: m_state.cycle_status,
+        //cycle_status: CYCLE_NO_STALL,
         rd: m_state.rd,
         rs2: m_state.rs2,
         rs2_val: m_state.rs2_val,
@@ -690,7 +691,7 @@ module DatapathPipelined (
         is_div: m_state.is_div
       };
 
-      div_stage_busy <= {div_stage_busy[6:0], divide};
+      div_stage_busy <= {div_stage_busy[5:0], divide};
 
       if (div_out_m_state.is_div) begin
         m_state <= div_out_m_state;
@@ -699,8 +700,8 @@ module DatapathPipelined (
         m_state <= '{
           pc: x_state.pc,
           insn: x_state.insn,
-          //cycle_status: x_state.cycle_status,
-          cycle_status: CYCLE_NO_STALL,
+          cycle_status: x_state.cycle_status,
+          //cycle_status: CYCLE_NO_STALL,
           rd: x_state.rd,
           rs2: x_state.rs2,
           rs2_val: x_src2,  
