@@ -5,22 +5,104 @@
 `define OPCODE_SIZE 6:0
 
 `include "../hw3-singlecycle/cycle_status.sv"
-`include "PipelineStageStructs.sv"
-`include "FunctionCalls.sv"  // Includes twos_comp32 function
+// `include "PipelineStageStructs.sv"
+// `include "FunctionCalls.sv"  // Includes twos_comp32 function
 
 // Creates an 8 stage pipelined divider. Each stage performs 4 iterations of the non-restoring division algorithm
 // Registers hold intermediate values and final results are output to a memory stage struct
 
-module DividerSignedPipelined (
+// function automatic logic [31:0] twos_comp32(input logic [31:0] x);
+//   twos_comp32 = (~x) + 32'd1;
+// endfunction
+
+function automatic logic [31:0] twos_comp32d(input logic [31:0] x);
+  twos_comp32d = (~x) + 32'd1;
+endfunction
+
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+} stage_decode_d;
+
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+  logic [4:0] rs1;
+  logic [4:0] rs2;
+  logic [4:0] rd;
+  logic [`REG_SIZE] rs1_val;
+  logic [`REG_SIZE] rs2_val;
+  logic [`REG_SIZE] imm_i_sext;
+  logic [`REG_SIZE] imm_b_sext;
+  logic [`REG_SIZE] imm_s_sext;
+  logic [`REG_SIZE] imm_u;
+  logic [2:0] funct3;
+  logic [6:0] funct7;
+  logic [`OPCODE_SIZE] opcode;
+  logic reg_write;
+  logic is_branch;
+  logic is_ecall;
+  logic is_load;
+  logic is_div;
+} stage_execute_d;
+
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+  logic [4:0] rs2;
+  logic [4:0] rd;
+  logic reg_write;
+  logic [`OPCODE_SIZE] opcode;
+  logic [2:0] funct3;
+  logic [6:0] funct7;
+  logic [`REG_SIZE] rs2_val;
+  logic [`REG_SIZE] rd_value;
+  logic is_ecall;
+  logic is_div;
+} stage_memory_d;
+
+typedef stage_memory_d stage_writeback_d;
+
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+  logic [4:0] rs2;
+  logic [4:0] rd;
+  logic reg_write;
+  logic [`OPCODE_SIZE] opcode;
+  logic [2:0] funct3;
+  logic [6:0] funct7;
+  logic [`REG_SIZE] rs2_val;
+  logic [`REG_SIZE] rd_value;
+  logic is_ecall;
+  logic is_div;
+  logic [`REG_SIZE] dividend;
+  logic [`REG_SIZE] divisor;
+  logic [`REG_SIZE] quotient;
+  logic [`REG_SIZE] remainder;
+  logic [`REG_SIZE] dividend_input;
+  logic [`REG_SIZE] divisor_input;
+  logic is_signed;
+  logic is_rem;
+  logic overflow;
+  logic negate_quotient;
+  logic negate_remainder;
+} stage_divider_d;
+
+module DividerUnsignedPipelined (
     input wire clk, rst, stall,
-    input stage_execute_t i_x_state,
+    input stage_execute_d i_x_state,
     input logic [`REG_SIZE] i_src1, i_src2,
-    output stage_memory_t o_m_state
+    output stage_memory_d o_m_state
 );
 
     genvar i;
 
-    stage_divider_t divider_state [8:0];  // Only 6:0 used, staves off warnings for now
+    stage_divider_d divider_state [8:0];  // Only 6:0 used, staves off warnings for now
 
 
     logic div_div_by_zero, div_overflow;
@@ -32,8 +114,8 @@ module DividerSignedPipelined (
     always_comb begin
         divider_state[0].pc = i_x_state.pc;
         divider_state[0].insn = i_x_state.insn;
-        divider_state[0].cycle_status = i_x_state.cycle_status;
-        //divider_state[0].cycle_status = CYCLE_NO_STALL;
+        //divider_state[0].cycle_status = i_x_state.cycle_status;
+        divider_state[0].cycle_status = CYCLE_NO_STALL;
         divider_state[0].rs2 = i_x_state.rs2;
         divider_state[0].rd = i_x_state.rd;
         divider_state[0].reg_write = i_x_state.reg_write;
@@ -55,8 +137,8 @@ module DividerSignedPipelined (
         div_a_neg = i_src1[31];
         div_b_neg = i_src2[31];
 
-        div_a_abs = div_a_neg ? twos_comp32(i_src1) : i_src1;
-        div_b_abs = div_b_neg ? twos_comp32(i_src2) : i_src2;
+        div_a_abs = div_a_neg ? twos_comp32d(i_src1) : i_src1;
+        div_b_abs = div_b_neg ? twos_comp32d(i_src2) : i_src2;
 
         if (!divider_state[0].is_signed) begin
             dividend_input = i_src1;
@@ -69,8 +151,8 @@ module DividerSignedPipelined (
         divider_state[0].negate_quotient = divider_state[0].is_signed && (div_a_neg ^ div_b_neg);
         divider_state[0].negate_remainder = divider_state[0].is_signed && div_a_neg;
 
-        divider_state[0].dividend = 32'h0;
-        divider_state[0].remainder = 32'h0;
+        //divider_state[0].dividend = 32'h0;
+        //divider_state[0].remainder = 32'h0;
 
         divider_state[0].dividend_input = dividend_input;
         divider_state[0].divisor_input = divisor_input;
@@ -186,8 +268,8 @@ module DividerSignedPipelined (
                 o_m_state.rd_value = (divider_state[7].is_rem) ? 32'h0 : 32'h8000_0000;
             end else if (divider_state[7].is_signed) begin
                 o_m_state.rd_value = (divider_state[7].is_rem)
-                    ? (divider_state[7].negate_remainder ? twos_comp32(divider_state[7].remainder) : divider_state[7].remainder)
-                    : (divider_state[7].negate_quotient  ? twos_comp32(divider_state[7].quotient)  : divider_state[7].quotient);
+                    ? (divider_state[7].negate_remainder ? twos_comp32d(divider_state[7].remainder) : divider_state[7].remainder)
+                    : (divider_state[7].negate_quotient  ? twos_comp32d(divider_state[7].quotient)  : divider_state[7].quotient);
             end else begin
                 o_m_state.rd_value = (divider_state[7].is_rem) ? divider_state[7].remainder : divider_state[7].quotient;
             end    

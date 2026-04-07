@@ -7,7 +7,7 @@ module MyClockGen (
 	output wire clk_proc;
 	output wire locked;
 	wire clkfb;
-	(* FREQUENCY_PIN_CLKI = "25" *) (* FREQUENCY_PIN_CLKOP = "20" *) (* ICP_CURRENT = "12" *) (* LPF_RESISTOR = "8" *) (* MFG_ENABLE_FILTEROPAMP = "1" *) (* MFG_GMCREF_SEL = "2" *) EHXPLLL #(
+	(* FREQUENCY_PIN_CLKI = "25" *) (* FREQUENCY_PIN_CLKOP = "12.5" *) (* ICP_CURRENT = "12" *) (* LPF_RESISTOR = "8" *) (* MFG_ENABLE_FILTEROPAMP = "1" *) (* MFG_GMCREF_SEL = "2" *) EHXPLLL #(
 		.PLLRST_ENA("DISABLED"),
 		.INTFB_WAKE("DISABLED"),
 		.STDBY_ENABLE("DISABLED"),
@@ -16,13 +16,13 @@ module MyClockGen (
 		.OUTDIVIDER_MUXB("DIVB"),
 		.OUTDIVIDER_MUXC("DIVC"),
 		.OUTDIVIDER_MUXD("DIVD"),
-		.CLKI_DIV(5),
+		.CLKI_DIV(2),
 		.CLKOP_ENABLE("ENABLED"),
-		.CLKOP_DIV(30),
-		.CLKOP_CPHASE(15),
+		.CLKOP_DIV(48),
+		.CLKOP_CPHASE(23),
 		.CLKOP_FPHASE(0),
 		.FEEDBK_PATH("INT_OP"),
-		.CLKFB_DIV(4)
+		.CLKFB_DIV(1)
 	) pll_i(
 		.RST(1'b0),
 		.STDBY(1'b0),
@@ -40,7 +40,7 @@ module MyClockGen (
 		.LOCK(locked)
 	);
 endmodule
-module DividerSignedPipelined (
+module DividerUnsignedPipelined (
 	clk,
 	rst,
 	stall,
@@ -67,9 +67,9 @@ module DividerSignedPipelined (
 	reg [31:0] div_b_abs;
 	reg [31:0] dividend_input;
 	reg [31:0] divisor_input;
-	function automatic [31:0] twos_comp32;
+	function automatic [31:0] twos_comp32d;
 		input reg [31:0] x;
-		twos_comp32 = ~x + 32'd1;
+		twos_comp32d = ~x + 32'd1;
 	endfunction
 	always @(*) begin
 		if (_sv2v_0)
@@ -93,8 +93,8 @@ module DividerSignedPipelined (
 		divider_state[0][2] = (divider_state[0][4] && (i_src1 == 32'h80000000)) && (i_src2 == 32'hffffffff);
 		div_a_neg = i_src1[31];
 		div_b_neg = i_src2[31];
-		div_a_abs = (div_a_neg ? twos_comp32(i_src1) : i_src1);
-		div_b_abs = (div_b_neg ? twos_comp32(i_src2) : i_src2);
+		div_a_abs = (div_a_neg ? twos_comp32d(i_src1) : i_src1);
+		div_b_abs = (div_b_neg ? twos_comp32d(i_src2) : i_src2);
 		if (!divider_state[0][4]) begin
 			dividend_input = i_src1;
 			divisor_input = i_src2;
@@ -215,7 +215,7 @@ module DividerSignedPipelined (
 			if (divider_state[7][2])
 				o_m_state[33-:32] = (divider_state[7][3] ? 32'h00000000 : 32'h80000000);
 			else if (divider_state[7][4])
-				o_m_state[33-:32] = (divider_state[7][3] ? (divider_state[7][0] ? twos_comp32(divider_state[7][100-:32]) : divider_state[7][100-:32]) : (divider_state[7][1] ? twos_comp32(divider_state[7][132-:32]) : divider_state[7][132-:32]));
+				o_m_state[33-:32] = (divider_state[7][3] ? (divider_state[7][0] ? twos_comp32d(divider_state[7][100-:32]) : divider_state[7][100-:32]) : (divider_state[7][1] ? twos_comp32d(divider_state[7][132-:32]) : divider_state[7][132-:32]));
 			else
 				o_m_state[33-:32] = (divider_state[7][3] ? divider_state[7][100-:32] : divider_state[7][132-:32]);
 		end
@@ -464,7 +464,7 @@ module DatapathPipelined (
 	reg [31:0] x_src1;
 	reg [31:0] x_src2;
 	wire [31:0] x_imm_j_sext = {{11 {x_state[292]}}, x_state[292], x_state[280:273], x_state[281], x_state[291:282], 1'b0};
-	DividerSignedPipelined u_div(
+	DividerUnsignedPipelined u_div(
 		.clk(clk),
 		.rst(rst),
 		.stall(d_load_stall),

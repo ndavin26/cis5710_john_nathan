@@ -17,10 +17,88 @@
 `include "../hw3-singlecycle/RvDisassembler.sv"
 `endif
 `include "../hw2b-cla/CarryLookaheadAdder.sv"
-`include "../hw4-multicycle/DividerSignedPipelined.sv"
-`include "../hw3-singlecycle/cycle_status.sv"
-`include "PipelineStageStructs.sv"
-`include "FunctionCalls.sv"
+`include "../hw4-multicycle/DividerUnsignedPipelined.sv"
+//`include "../hw3-singlecycle/cycle_status.sv"
+// `include "PipelineStageStructs.sv"
+// `include "FunctionCalls.sv"
+
+function automatic logic [31:0] twos_comp32(input logic [31:0] x);
+  twos_comp32 = (~x) + 32'd1;
+endfunction
+
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+} stage_decode_t;
+
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+  logic [4:0] rs1;
+  logic [4:0] rs2;
+  logic [4:0] rd;
+  logic [`REG_SIZE] rs1_val;
+  logic [`REG_SIZE] rs2_val;
+  logic [`REG_SIZE] imm_i_sext;
+  logic [`REG_SIZE] imm_b_sext;
+  logic [`REG_SIZE] imm_s_sext;
+  logic [`REG_SIZE] imm_u;
+  logic [2:0] funct3;
+  logic [6:0] funct7;
+  logic [`OPCODE_SIZE] opcode;
+  logic reg_write;
+  logic is_branch;
+  logic is_ecall;
+  logic is_load;
+  logic is_div;
+} stage_execute_t;
+
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+  logic [4:0] rs2;
+  logic [4:0] rd;
+  logic reg_write;
+  logic [`OPCODE_SIZE] opcode;
+  logic [2:0] funct3;
+  logic [6:0] funct7;
+  logic [`REG_SIZE] rs2_val;
+  logic [`REG_SIZE] rd_value;
+  logic is_ecall;
+  logic is_div;
+} stage_memory_t;
+
+typedef stage_memory_t stage_writeback_t;
+
+typedef struct packed {
+  logic [`REG_SIZE] pc;
+  logic [`INSN_SIZE] insn;
+  cycle_status_e cycle_status;
+  logic [4:0] rs2;
+  logic [4:0] rd;
+  logic reg_write;
+  logic [`OPCODE_SIZE] opcode;
+  logic [2:0] funct3;
+  logic [6:0] funct7;
+  logic [`REG_SIZE] rs2_val;
+  logic [`REG_SIZE] rd_value;
+  logic is_ecall;
+  logic is_div;
+  logic [`REG_SIZE] dividend;
+  logic [`REG_SIZE] divisor;
+  logic [`REG_SIZE] quotient;
+  logic [`REG_SIZE] remainder;
+  logic [`REG_SIZE] dividend_input;
+  logic [`REG_SIZE] divisor_input;
+  logic is_signed;
+  logic is_rem;
+  logic overflow;
+  logic negate_quotient;
+  logic negate_remainder;
+} stage_divider_t;
 
 module Disasm #(
     byte PREFIX = "D"
@@ -267,7 +345,7 @@ module DatapathPipelined (
   logic [`REG_SIZE] x_src2;
   wire [`REG_SIZE] x_imm_j_sext = {{11{x_state.insn[31]}}, x_state.insn[31], x_state.insn[19:12], x_state.insn[20], x_state.insn[30:21], 1'b0};
   
-  DividerSignedPipelined u_div(
+  DividerUnsignedPipelined u_div(
     .clk(clk), .rst(rst), .stall(d_load_stall),
     .i_x_state(x_state),
     .i_src1(x_src1),
