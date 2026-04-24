@@ -854,6 +854,7 @@ module SystemResourceCheck (
 			wire [189:0] div_out_m_state;
 			reg dependent_on_active_div;
 			reg [4:0] active_div_rd [6:0];
+			reg branch_refill_pending;
 			reg [324:0] div_issue_state;
 			wire divide_issue = x_state[0] && !dependent_on_active_div;
 			always @(*) begin
@@ -990,6 +991,8 @@ module SystemResourceCheck (
 				endcase
 				if (x_state[260-:32] != 32'd1)
 					x_branch_taken = 1'b0;
+				if (d_is_load_stall)
+					x_branch_taken = 1'b0;
 			end
 			reg [189:0] m_state;
 			wire [255:0] m_disasm;
@@ -1046,13 +1049,19 @@ module SystemResourceCheck (
 				.insn(w_state[157-:32]),
 				.disasm(w_disasm)
 			);
+			reg [31:0] trace_status_out;
 			always @(*) begin
 				if (_sv2v_0)
 					;
-				trace_completed_cycle_status = w_state[125-:32];
-				trace_completed_pc = (w_state[125-:32] == 32'd1 ? w_state[189-:32] : 32'd0);
-				trace_completed_insn = (w_state[125-:32] == 32'd1 ? w_state[157-:32] : 32'd0);
-				halt = (w_state[125-:32] == 32'd1) && w_state[1];
+				trace_status_out = w_state[125-:32];
+				if (trace_status_out != 32'd1) begin
+					if (((w_state[125-:32] != 32'd16) && (w_state[125-:32] != 32'd4)) && (((((m_state[125-:32] == 32'd8) || (x_state[260-:32] == 32'd8)) || (decode_state[31-:32] == 32'd8)) || (g_state[31-:32] == 32'd8)) || branch_refill_pending))
+						trace_status_out = 32'd8;
+				end
+				trace_completed_cycle_status = trace_status_out;
+				trace_completed_pc = (trace_status_out == 32'd1 ? w_state[189-:32] : 32'd0);
+				trace_completed_insn = (trace_status_out == 32'd1 ? w_state[157-:32] : 32'd0);
+				halt = (trace_status_out == 32'd1) && w_state[1];
 				rf_rd = w_state[88-:5];
 				rf_rd_data = w_state[33-:32];
 				rf_we = w_state[83];
@@ -1181,9 +1190,9 @@ module SystemResourceCheck (
 			always @(posedge clk)
 				if (rst) begin
 					f_pc_current <= 32'd0;
-					g_state <= 64'h0000000000000004;
+					g_state <= 64'h0000000000000080;
 					g_valid <= 1'b0;
-					decode_state <= make_decode_bubble(32'd4);
+					decode_state <= make_decode_bubble(32'd128);
 					x_state <= make_execute_bubble(32'd4);
 					m_state <= make_memory_bubble(32'd4);
 					w_state <= make_memory_bubble(32'd4);
@@ -1195,6 +1204,7 @@ module SystemResourceCheck (
 					active_div_rd[4] <= 5'd0;
 					active_div_rd[5] <= 5'd0;
 					active_div_rd[6] <= 5'd0;
+					branch_refill_pending <= 1'b0;
 				end
 				else begin
 					w_state <= {sv2v_cast_32(m_state[189-:32]), sv2v_cast_32(m_state[157-:32]), sv2v_cast_32(m_state[125-:32]), sv2v_cast_5(m_state[93-:5]), sv2v_cast_5(m_state[88-:5]), m_state[83], sv2v_cast_7(m_state[82-:7]), sv2v_cast_3(m_state[75-:3]), sv2v_cast_7(m_state[72-:7]), sv2v_cast_32(m_state[65-:32]), m_result_to_wb, m_state[1], m_state[0]};
@@ -1206,25 +1216,29 @@ module SystemResourceCheck (
 					active_div_rd[2] <= active_div_rd[1];
 					active_div_rd[1] <= active_div_rd[0];
 					active_div_rd[0] <= (divide_issue ? x_state[218-:5] : 5'd0);
+					if (x_branch_taken)
+						branch_refill_pending <= 1'b1;
+					else if (branch_refill_pending && imem_resp_fire)
+						branch_refill_pending <= 1'b0;
 					if (div_out_m_state[0])
 						m_state <= div_out_m_state;
 					else if (!mem_stall)
 						m_state <= {sv2v_cast_32(x_state[324-:32]), sv2v_cast_32(x_state[292-:32]), sv2v_cast_32(x_state[260-:32]), sv2v_cast_5(x_state[223-:5]), sv2v_cast_5(x_state[218-:5]), x_state[4], sv2v_cast_7(x_state[11-:7]), sv2v_cast_3(x_state[21-:3]), sv2v_cast_7(x_state[18-:7]), x_src2, x_alu_result, x_state[2], x_state[0]};
 					else
 						m_state <= make_memory_bubble(32'd2);
-					if (x_branch_taken) begin
-						f_pc_current <= x_branch_target;
-						g_state <= 64'h0000000000000008;
-						g_valid <= 1'b0;
-						decode_state <= make_decode_bubble(32'd8);
-						x_state <= make_execute_bubble(32'd8);
-					end
-					else if (d_is_load_stall) begin
+					if (d_is_load_stall) begin
 						f_pc_current <= f_pc_current;
 						g_state <= g_state;
 						g_valid <= g_valid;
 						decode_state <= decode_state;
 						x_state <= make_execute_bubble(32'd16);
+					end
+					else if (x_branch_taken) begin
+						f_pc_current <= x_branch_target;
+						g_state <= 64'h0000000000000008;
+						g_valid <= 1'b0;
+						decode_state <= make_decode_bubble(32'd8);
+						x_state <= make_execute_bubble(32'd8);
 					end
 					else if (div_stall) begin
 						f_pc_current <= f_pc_current;
@@ -1240,7 +1254,7 @@ module SystemResourceCheck (
 							f_pc_current <= f_pc_current + 32'd4;
 						end
 						else if (imem_resp_fire) begin
-							g_state <= 64'h0000000000000004;
+							g_state <= 64'h0000000000000080;
 							g_valid <= 1'b0;
 							f_pc_current <= f_pc_current;
 						end
@@ -1251,10 +1265,10 @@ module SystemResourceCheck (
 						end
 						if (imem_resp_fire)
 							decode_state <= {sv2v_cast_32(g_state[63-:32]), sv2v_cast_32(SystemResourceCheck.axil_mem_ro.RDATA), 32'd1};
-						else if (g_valid || imem_req_fire)
-							decode_state <= make_decode_bubble(32'd128);
+						else if (branch_refill_pending || (g_state[31-:32] == 32'd8))
+							decode_state <= make_decode_bubble(32'd8);
 						else
-							decode_state <= make_decode_bubble(32'd4);
+							decode_state <= make_decode_bubble(32'd128);
 						x_state <= {sv2v_cast_32(decode_state[95-:32]), sv2v_cast_32(decode_state[63-:32]), sv2v_cast_32(decode_state[31-:32]), d_rs1, d_rs2, d_rd, rf_rs1_data, rf_rs2_data, d_imm_i_sext, d_imm_b_sext, d_imm_s_sext, d_imm_u, d_funct3, d_funct7, d_opcode, d_reg_write, d_is_branch, d_is_ecall, d_is_load, d_is_div};
 					end
 				end

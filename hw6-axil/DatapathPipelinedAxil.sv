@@ -505,6 +505,9 @@ module DatapathPipelinedAxil (
     if (x_state.cycle_status != CYCLE_NO_STALL) begin
       x_branch_taken = 1'b0;
     end
+    if (d_is_load_stall) begin
+      x_branch_taken = 1'b0;
+    end
   end
 
 
@@ -592,19 +595,42 @@ module DatapathPipelinedAxil (
     trace_status_out = w_state.cycle_status;
 
 
-    if (trace_status_out != CYCLE_NO_STALL) begin
-      if ((m_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
-          (x_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
-          (decode_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
-          (g_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
-          branch_refill_pending) begin
-        trace_status_out = CYCLE_TAKEN_BRANCH;
-      end else if ((m_state.cycle_status == CYCLE_IMEM_WAIT) ||
-                   (x_state.cycle_status == CYCLE_IMEM_WAIT) ||
-                   (decode_state.cycle_status == CYCLE_IMEM_WAIT)) begin
-        trace_status_out = CYCLE_IMEM_WAIT;
+      if (trace_status_out != CYCLE_NO_STALL) begin
+        if ((w_state.cycle_status != CYCLE_LOAD2USE) &&
+            (w_state.cycle_status != CYCLE_RESET) &&
+            ((m_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
+            (x_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
+            (decode_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
+            (g_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
+            branch_refill_pending)) begin
+          trace_status_out = CYCLE_TAKEN_BRANCH;
+        end
       end
-    end
+    // if (trace_status_out != CYCLE_NO_STALL) begin
+    //     if ((m_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
+    //         (x_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
+    //         (decode_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
+    //         (g_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
+    //         branch_refill_pending) begin
+    //       trace_status_out = CYCLE_TAKEN_BRANCH;
+    //     end
+    //   end
+
+
+    // if (trace_status_out != CYCLE_NO_STALL) begin
+    //   if ((m_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
+    //       (x_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
+    //       (decode_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
+    //       (g_state.cycle_status == CYCLE_TAKEN_BRANCH) ||
+    //       branch_refill_pending) begin
+    //     trace_status_out = CYCLE_TAKEN_BRANCH;
+    //   end else if ((w_state.cycle_status != CYCLE_RESET) &&
+    //                (m_state.cycle_status == CYCLE_IMEM_WAIT) ||
+    //                (x_state.cycle_status == CYCLE_IMEM_WAIT) ||
+    //                (decode_state.cycle_status == CYCLE_IMEM_WAIT)) begin
+    //                   trace_status_out = CYCLE_IMEM_WAIT;
+    //   end
+    // end
 
     trace_completed_cycle_status = trace_status_out;
     trace_completed_pc = (trace_status_out == CYCLE_NO_STALL) ? w_state.pc : 32'd0;
@@ -783,9 +809,9 @@ module DatapathPipelinedAxil (
   always_ff @(posedge clk) begin
     if (rst) begin
       f_pc_current <= 32'd0;
-      g_state <= '{pc: 32'd0, cycle_status: CYCLE_RESET};
+      g_state <= '{pc: 32'd0, cycle_status: CYCLE_IMEM_WAIT};
       g_valid <= 1'b0;
-      decode_state <= make_decode_bubble(CYCLE_RESET);
+      decode_state <= make_decode_bubble(CYCLE_IMEM_WAIT);
       x_state <= make_execute_bubble(CYCLE_RESET);
 
       m_state <= make_memory_bubble(CYCLE_RESET);
@@ -860,20 +886,34 @@ module DatapathPipelinedAxil (
         m_state <= make_memory_bubble(CYCLE_DIV);
       end
 
-      if (x_branch_taken) begin
-        // Flush wrong-path F/G/D, already prevented a new wrong-path AR request.
-        f_pc_current <= x_branch_target;
-        g_state <= '{pc: 32'd0, cycle_status: CYCLE_TAKEN_BRANCH};
-        g_valid <= 1'b0;
-        decode_state <= make_decode_bubble(CYCLE_TAKEN_BRANCH);
-        x_state <= make_execute_bubble(CYCLE_TAKEN_BRANCH);
-      end else if (d_is_load_stall) begin
-        // hold F/G/D. Insert a bubble into X
+      if (d_is_load_stall) begin
+        // load-use takes priority — branch in X may be using stale data
         f_pc_current <= f_pc_current;
         g_state <= g_state;
         g_valid <= g_valid;
         decode_state <= decode_state;
         x_state <= make_execute_bubble(CYCLE_LOAD2USE);
+      end else if (x_branch_taken) begin
+        // branch flush
+        f_pc_current <= x_branch_target;
+        g_state <= '{pc: 32'd0, cycle_status: CYCLE_TAKEN_BRANCH};
+        g_valid <= 1'b0;
+        decode_state <= make_decode_bubble(CYCLE_TAKEN_BRANCH);
+        x_state <= make_execute_bubble(CYCLE_TAKEN_BRANCH);
+      // if (x_branch_taken) begin
+      //   // Flush wrong-path F/G/D, already prevented a new wrong-path AR request.
+      //   f_pc_current <= x_branch_target;
+      //   g_state <= '{pc: 32'd0, cycle_status: CYCLE_TAKEN_BRANCH};
+      //   g_valid <= 1'b0;
+      //   decode_state <= make_decode_bubble(CYCLE_TAKEN_BRANCH);
+      //   x_state <= make_execute_bubble(CYCLE_TAKEN_BRANCH);
+      // end else if (d_is_load_stall) begin
+      //   // hold F/G/D. Insert a bubble into X
+      //   f_pc_current <= f_pc_current;
+      //   g_state <= g_state;
+      //   g_valid <= g_valid;
+      //   decode_state <= decode_state;
+      //   x_state <= make_execute_bubble(CYCLE_LOAD2USE);
       end else if (div_stall) begin
         // hold the front-end and keep the divide in X
         // ;latch the currently-forwarded operands so transient WX/MX bypassed values
@@ -913,7 +953,7 @@ module DatapathPipelinedAxil (
 
         end else if (imem_resp_fire) begin
 
-          g_state <= '{pc: 32'd0, cycle_status: CYCLE_RESET};
+          g_state <= '{pc: 32'd0, cycle_status: CYCLE_IMEM_WAIT};
           g_valid <= 1'b0;
           f_pc_current <= f_pc_current;
 
@@ -933,11 +973,14 @@ module DatapathPipelinedAxil (
           };
         end else if (branch_refill_pending || (g_state.cycle_status == CYCLE_TAKEN_BRANCH)) begin
           decode_state <= make_decode_bubble(CYCLE_TAKEN_BRANCH);
-        end else if (g_valid || imem_req_fire) begin
-          decode_state <= make_decode_bubble(CYCLE_IMEM_WAIT);
         end else begin
-          decode_state <= make_decode_bubble(CYCLE_RESET);
+          decode_state <= make_decode_bubble(CYCLE_IMEM_WAIT);
         end
+        // else if (g_valid || imem_req_fire) begin
+        //   decode_state <= make_decode_bubble(CYCLE_IMEM_WAIT);
+        // end else begin
+        //   decode_state <= make_decode_bubble(CYCLE_RESET);
+        // end
 
         x_state <= '{
           pc: decode_state.pc,
